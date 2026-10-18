@@ -1,0 +1,20 @@
+# 本机私有内容，永不提交
+.env
+*.local.*
+config.toml
+persona/*.md
+!persona/*.example.md
+data/
+memory/
+logs/
+*.log
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+# 系统
+.DS_Store
+Thumbs.db
+desktop.ini
