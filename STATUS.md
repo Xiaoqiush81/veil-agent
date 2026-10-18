@@ -1,6 +1,6 @@
 # 当前状态
 
-更新：2026-10-18 21:49 UTC · Claude
+更新：2026-10-18 21:50 UTC · Claude
 
 ## 当前目标
 
@@ -11,15 +11,15 @@
 - 仓库刚重建，只有协作文件（本 PR）。还没有任何程序代码。
 - 路线：[重建计划](https://claude.ai/code/artifact/0c29eb8c-d095-4575-9449-18e3f0efdd00)。复用依据：[参考仓库调查](https://claude.ai/code/artifact/25befcb0-c4db-4927-a29b-cc459951d1ba)。
 
-## 开工前等 lan 定
+## 已定（lan 2026-10-18）
 
-1. 技术栈：建议 Python。
-2. Peter 先用哪个模型：建议先 DeepSeek，配置里一行可换 GPT。
-3. 花费上限：建议 ¥10/天、¥300/月，不设请求次数上限。
+- 技术栈：Python。
+- Peter 先用 DeepSeek，配置里一行可换 GPT。
+- 花费上限：¥10/天、¥300/月，不设请求次数上限。
 
 ## 下一步
 
-lan 定好上面三项后，写工单 `docs/tickets/002-text-chat.md`，开分支 `ticket/002-text-chat`。
+写工单 `docs/tickets/002-text-chat.md`，开分支 `ticket/002-text-chat`。
 
 ## 大块 1 的验收步骤（lan 在 Windows 上做）
 
