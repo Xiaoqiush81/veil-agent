@@ -3,11 +3,20 @@
 本仓库做本地 Windows 上的 AI 伴侣（第一个角色 Peter，之后 Ghost）。
 完整路线见 [重建计划](https://claude.ai/code/artifact/0c29eb8c-d095-4575-9449-18e3f0efdd00)；当前进度只看 `STATUS.md`。
 
-## 开工前必读
+## 开工和收工（每个窗口必做）
 
-1. `STATUS.md`：当前目标、现状、下一步、验收步骤。
-2. `HANDOFF.md`：上一位 agent 停在哪、注意什么。
-3. 要做的事对应的 skill：`.agents/skills/<名字>/SKILL.md`。
+开工：
+1. 先拉取最新的 `main` 分支。
+2. 读 `STATUS.md` 和 `HANDOFF.md`，以仓库里的内容为准，不以聊天记录或记忆为准。要做的事有对应 skill 就读 `.agents/skills/<名字>/SKILL.md`。
+3. 用两句话向 lan 复述：当前目标、你接下来要做什么。和 `STATUS.md` 对不上就先问。
+
+收工（每个 PR 里必须包含）：
+1. 在同一个 PR 里更新 `STATUS.md`（目标、现状、下一步、验收步骤）。
+2. 窗口结束或换人时更新 `HANDOFF.md`：做到哪、卡在哪、下一个窗口第一步做什么。
+3. `STATUS.md` 只写当前正确状态，不写被否决的方案和历史误解。
+4. 没更新 `STATUS.md` 的 PR 不算完成。
+
+进度只有一份，就是 `main` 分支上的 `STATUS.md`。不要在别处另存进度。
 
 ## 项目规则
 
@@ -41,4 +50,4 @@
 - 工单放 `docs/tickets/<编号>-<短名>.md`，只写已确认的目标、当前状态、验收步骤，不写被否决的方案。
 - 评审机器人（CodeRabbit，“小兔子”）的意见只处理会坏功能或有安全问题的，其余回一句不改。
 - 合并：纯文档、流程类 PR 由 agent 在检查通过后合并；功能 PR 在 lan 体验验收通过后合并。只用 GitHub 合并，不直接推 `main`。
-- 每次停下或交接前更新 `STATUS.md` 和 `HANDOFF.md`（见 `handoff` skill）。
+- 每个 PR 都更新 `STATUS.md`；停下或交接前更新 `HANDOFF.md`（见 `handoff` skill）。

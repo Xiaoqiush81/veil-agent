@@ -5,6 +5,7 @@ description: 开一张新工单并做到合并：写工单、开分支、实现�
 
 # 工单流程
 
+0. **开工**：拉取最新 `main`，读 `STATUS.md`、`HANDOFF.md`，用两句话向 lan 复述当前目标和你要做什么（`AGENTS.md`“开工和收工”）。
 1. **过三问**（`AGENTS.md`）。任何一问答不上来，停下，告诉 lan 原因。
 2. **先查复用**：按 `reuse-first` skill 查有没有成熟实现。
 3. **写工单** `docs/tickets/<编号>-<短名>.md`，编号接着最大的往下排。只写三段：
@@ -18,6 +19,6 @@ description: 开一张新工单并做到合并：写工单、开分支、实现�
 7. **处理评审**：按 `pr-review` skill。
 8. **验收**：功能 PR 请 lan 按验收步骤体验。没通过就是没完成，回到第 5 步；同一个问题修两次还坏，停下报告。
 9. **合并**：lan 说通过后用 GitHub 合并（纯文档 PR 检查通过即可合并）。不直接推 `main`。
-10. **收尾**：按 `handoff` skill 更新 `STATUS.md`、`HANDOFF.md`。
+10. **收尾**：按 `handoff` skill 更新 `STATUS.md`（每个 PR 必须）和 `HANDOFF.md`（窗口结束或换人时）。没更新 `STATUS.md` 的 PR 不算完成。
 
 做了一个小时还没完：判断要不要继续，然后告诉 lan。
