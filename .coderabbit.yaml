@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# 小兔子：只抓会坏功能和有安全问题的地方，不出风格建议。
+language: zh-CN
+tone_instructions: >-
+  直接、简短。只报会让功能出错、丢数据、多花钱或有安全风险的问题；
+  风格、命名、重构偏好一律不提。
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  high_level_summary_instructions: >-
+    用中文三句话以内：改了什么、对 lan 的使用有什么影响、有没有风险。
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  in_progress_fortune: false
+  path_instructions:
+    - path: '**'
+      instructions: |
+        只报这几类，其余不要评论：
+        - 功能会坏、会崩、会卡死、取消后状态错乱。
+        - 用户数据（记忆、聊天记录、配置）可能丢失或被覆盖。
+        - 花费上限可能被绕过，或请求失控重复发送。
+        - 安全：泄露 API Key、人设或真实聊天被提交、工具越权（白名单外的路径或命令）、
+          一个角色读到另一个角色未共享的记忆。
+        不要建议增加新功能、新工具、新依赖或防御性代码。
+    - path: '**/*.md'
+      instructions: |
+        只检查是否写进了密钥、真实人设或真实聊天内容；其他不评论。
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+  pre_merge_checks:
+    docstrings:
+      mode: 'off'
+  tools:
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    ruff:
+      enabled: true
+    actionlint:
+      enabled: true
+chat:
+  auto_reply: true
+  art: false
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - '**/AGENTS.md'
