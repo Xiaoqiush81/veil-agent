@@ -70,14 +70,17 @@ class LiveAdapter(unittest.TestCase):
                     self.assertIn(key, memory.command('/memory'))
                     self.assertIn(key, memory.context('下周四的面试我有点紧张')[-1]['content'])
                     memory.command('/forget ' + key)
+                    memory.command('/forget ' + key + ' 确认')
                     self.assertNotIn(key, '\n'.join(m['content'] for m in memory.context('interview')))
                     memory.command('/restore ' + key)
                     self.assertIn(key, memory.context('interview')[-1]['content'])
                     query = '最近搬家后还是很孤独很想家'
                     self.assertIn(feel_key, memory.context(query)[-1]['content'])
                     memory.command('/forget ' + feel_key)
+                    memory.command('/forget ' + feel_key + ' 确认')
                     self.assertNotIn(feel_key, '\n'.join(m['content'] for m in memory.context(query)))
                     memory.command('/restore ' + feel_key)
                     self.assertIn(feel_key, memory.context(query)[-1]['content'])
                     self.assertEqual(memory.state['cursor'], 4)
             self.assertFalse(backend.thread.is_alive())
+
