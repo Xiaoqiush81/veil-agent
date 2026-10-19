@@ -162,7 +162,7 @@ class NativeMemoryTools:
                 self.search_results[key] = exact_content
                 rendered.append(f'[记忆编号: {key} | 标题: {title}]\n{exact_content}')
             else:
-                display = body.split('\n', 1)[1] if '\n' in body else body
+                display = body.removeprefix(f'[bucket_id:{key}]').strip()
                 rendered.append(f'[记忆编号: {key} | 标题: {title} | 本地原文未定位，不能更新]\n{display}')
         result = '\n---\n'.join(rendered) or '没有找到相关记忆。'
         raw = result.encode('utf-8')
