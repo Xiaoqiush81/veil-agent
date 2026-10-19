@@ -217,8 +217,10 @@ class MemoryTests(unittest.TestCase):
         self.memory.supplement()
         sent = json.loads(self.model.call_args.args[0][1]['content'])
         self.assertNotIn(key, [e['id'] for e in sent['existing']])
-        self.assertIn('没有这个记忆编号', self.memory.command(f'/restore {key}'))
         self.assertIn('没有这个记忆编号', self.memory.command(f'/delete {key} 确认'))
+        self.assertIn('已恢复删除的记忆', self.memory.command(f'/restore {key}'))
+        self.assertFalse(self.backend.rows[key]['deleted'])
+        self.assertIn(key, self.memory.command('/memory'))
 
     def test_delete_stays_out_of_recall_even_if_ombre_does_not_confirm(self):
         self.turns(4)
