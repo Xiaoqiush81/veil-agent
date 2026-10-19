@@ -434,7 +434,7 @@ class Memory:
             entry = {'title': previous.get('title') or self.title_for(memory_id) or memory_id,
                      'time': previous.get('time') or self.budget.clock(),
                      'signature': previous.get('signature'), 'hidden': bool(previous.get('hidden')),
-                     'text': content, 'native': True, 'updated': self.budget.clock()}
+                     'text': content[:600], 'native': True, 'updated': self.budget.clock()}
             for flag in ('deleted', 'delete_pending'):
                 if previous.get(flag):
                     entry[flag] = True
@@ -780,6 +780,11 @@ class Memory:
                     return '这次没能确认恢复；记忆库记录仍保留，可稍后重试。'
                 entry.pop('deleted', None)
                 entry.pop('delete_pending', None)
+                self.persist()
+                try:
+                    self.call('trace', {'bucket_id': key, 'dont_surface': 0})
+                except Exception:
+                    return '已恢复归档，但取消隐藏失败；记忆仍保留，可稍后重试 /restore。'
                 entry['hidden'] = False
                 self.persist()
                 return '已恢复删除的记忆。'
