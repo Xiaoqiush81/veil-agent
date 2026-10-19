@@ -95,7 +95,8 @@ class NativeMemoryTools:
             source_ids = [key for key in merge_ids if key != target_id]
             if any(key not in self.search_results for key in source_ids):
                 return '程序拒绝：每个 merge_id 都必须来自本轮 breath_search 的结果。', '被拒绝', summary
-            if not self.memory.visible([(key, self.search_results[key]) for key in source_ids]):
+            if (source_ids
+                    and not self.memory.visible([(key, self.search_results[key]) for key in source_ids])):
                 return '程序拒绝：有待整合的记忆已隐藏或不可用，未做更新。', '被拒绝', summary
             current = self.memory.content_for(target_id, refresh=True)
             if current != previous:
