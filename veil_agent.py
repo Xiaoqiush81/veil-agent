@@ -449,11 +449,20 @@ class Chat:
         final = ''
         next_reservation = None
 
+        # max_input_tokens is a TOKEN limit, but request bytes overcount tokens (roughly 3-4 bytes per token
+        # in any language). After each response the provider reports the real prompt size, so later estimates
+        # scale the bytes by that measured ratio, never below 0.5 (still a 2x margin over a typical text).
+        calibration = 1.0
+
+        def message_bytes(m):
+            return len(json.dumps(m, ensure_ascii=False).encode('utf-8')) + 256
+
+        def schema_bytes(offered):
+            return len(json.dumps(offered or [], ensure_ascii=False).encode('utf-8')) + 256
+
         def request_size(offered):
             # Count each message once, including tool-call arguments and reasoning.
-            return (sum(len(json.dumps(m, ensure_ascii=False).encode('utf-8')) + 256
-                        for m in loop_messages)
-                    + len(json.dumps(offered or [], ensure_ascii=False).encode('utf-8')) + 256)
+            return int(calibration * (sum(message_bytes(m) for m in loop_messages) + schema_bytes(offered)))
 
         def fit_history(offered):
             nonlocal history_count
@@ -482,11 +491,14 @@ class Chat:
                     self.budget.settle(next_reservation, self.cfg, 0, 0, 0)
                 break
             reservation = request_id if step == 0 else next_reservation
+            sent_bytes = sum(message_bytes(m) for m in loop_messages) + schema_bytes(offered)
             try:
                 response = self.model(loop_messages, tools=offered, message_output=True)
             except Exception:
                 raise
             message, prompt, completion, cached = response
+            if isinstance(prompt, int) and prompt > 0:
+                calibration = max(0.5, min(1.0, prompt / sent_bytes))
             self.budget.settle(reservation, self.cfg, prompt, completion, cached)
             if not message.tool_calls:
                 final = message.content or ''
@@ -528,8 +540,14 @@ class Chat:
                 can_report_results = request_size(next_offered) <= self.cfg.provider['max_input_tokens']
                 del loop_messages[-len(placeholders):]
                 if not can_report_results:
+                    self.output(f'（长度检查：估算 {request_size(next_offered)}，上限 {self.cfg.provider["max_input_tokens"]}，'
+                                f'按实测比例 {calibration:.2f} 折算。）')
                     for call in message.tool_calls:
-                        summary = call.function.name
+                        try:
+                            summary = self.tools.preview_summary(call.function.name, json.loads(call.function.arguments))
+                        except (ValueError, TypeError, AttributeError):
+                            summary = None
+                        summary = summary if isinstance(summary, str) else call.function.name
                         self.output(display_call(call.function.name, summary, '被拒绝'))
                         summaries.append({'tool': call.function.name, 'path': summary, 'state': '被拒绝'})
                         self.store.append(f'{self.cfg.id}/tools.jsonl', {'request_id': request_id,
@@ -547,8 +565,8 @@ class Chat:
                         result, state, summary = '程序拒绝：工具参数不是合法 JSON 对象。', '被拒绝', call.function.name
                     tool_message = {'role': 'tool', 'tool_call_id': call.id, 'content': result}
                     loop_messages.append(tool_message)
-                    history_bytes = sum(len(json.dumps(m, ensure_ascii=False).encode('utf-8')) + 256
-                                        for m in loop_messages[history_start:history_start + history_count])
+                    history_bytes = calibration * sum(message_bytes(m)
+                        for m in loop_messages[history_start:history_start + history_count])
                     if request_size(next_offered) - history_bytes > self.cfg.provider['max_input_tokens']:
                         tool_message['content'] = too_long_result
                         state = '结果过长'

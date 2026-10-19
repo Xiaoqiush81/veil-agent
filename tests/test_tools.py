@@ -332,7 +332,7 @@ max_result_bytes = 200
 
     def test_oversized_tool_call_record_refuses_write_before_approval(self):
         first = self.message([self.tool_call('write_file',
-            '{"path":"new.txt","content":"hello"}', 'write')], reasoning='x' * 6000)
+            '{"path":"new.txt","content":"hello"}', 'write')], reasoning='x' * 14000)
         model = Mock(return_value=(first, 100, 20, 0))
         tools = Mock()
         tools.tools = [SimpleNamespace(name='write_file', description='Write', inputSchema={})]
@@ -351,7 +351,7 @@ max_result_bytes = 200
         tools = Mock()
         tools.tools = [SimpleNamespace(name='read_text_file', description='Read', inputSchema={})]
         tools.capability_event = None
-        tools.invoke.return_value = ('secret' * 1000, '成功', 'large.txt')
+        tools.invoke.return_value = ('secret' * 3000, '成功', 'large.txt')
         chat = Chat(self.cfg, self.store, self.budget, model, tools=tools, output=lambda _: None)
         self.assertEqual(chat.send('read it'), 'The result was too long.')
         forwarded = model.call_args_list[1].args[0][-1]['content']
@@ -366,10 +366,11 @@ max_result_bytes = 200
         first = self.message([self.tool_call('read_text_file', '{"path":"test.txt"}', 'read')])
         final = self.message(content='The file has test data.')
         requests = []
-        responses = [(first, 100, 20, 0), (final, 120, 20, 0)]
+        responses = [first, final]
         def model(messages, **_kwargs):
             requests.append(json.loads(json.dumps(messages)))
-            return responses[len(requests) - 1]
+            # Report a prompt size that matches the request, as a real provider would.
+            return responses[len(requests) - 1], min(6000, len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) + 256 * len(messages) + 500), 20, 0
         tools = Mock()
         tools.tools = [SimpleNamespace(name='read_text_file', description='Read', inputSchema={})]
         tools.capability_event = None
