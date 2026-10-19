@@ -35,6 +35,8 @@ class Backend:
         if name == 'trace':
             if args.get('delete'):
                 self.rows[args['bucket_id']]['deleted'] = True
+            elif args.get('restore'):
+                self.rows[args['bucket_id']]['deleted'] = False
             elif 'content' in args:
                 self.rows[args['bucket_id']]['content'] = args['content']
             else:
@@ -45,7 +47,8 @@ class Backend:
             return '\n'.join(f'[bucket_id:{k}] {v["content"]}'
                 for k, v in self.rows.items() if v.get('feel'))
         if name == 'breath_search':
-            rows = [(k, v) for k, v in self.rows.items() if not v.get('hidden') and not v.get('feel')]
+            rows = [(k, v) for k, v in self.rows.items()
+                    if not v.get('hidden') and not v.get('deleted') and not v.get('feel')]
             return '\n'.join(f'[bucket_id:{k}] {v["content"]}' for k, v in rows) + (
                 '\n=== ombre:result-ids ===\n```json\n' + json.dumps({'bucket_ids': [k for k, _ in rows]}) + '\n```')
         raise AssertionError(name)
@@ -152,6 +155,7 @@ class MemoryTests(unittest.TestCase):
         self.assertEqual([e['id'] for e in sent['existing']], [key])
         self.assertEqual(sent['existing'][0]['text'], '下周有安排。')
         self.memory.command(f'/forget {key}')
+        self.memory.command(f'/forget {key} 确认')
         self.turns(4, 8)
         self.memory.supplement()
         sent = json.loads(self.model.call_args.args[0][1]['content'])
@@ -179,6 +183,7 @@ class MemoryTests(unittest.TestCase):
         self.memory.supplement()
         key = next(iter(self.memory.state['entries']))
         self.memory.command(f'/forget {key}')
+        self.memory.command(f'/forget {key} 确认')
         self.turns(4, 4)
 
         def update(messages, *, json_output, **extra):
@@ -336,6 +341,7 @@ class MemoryTests(unittest.TestCase):
         key = next(k for k, v in self.backend.rows.items() if v.get('feel'))
         reopened = self.open()
         reopened.command('/forget ' + key)
+        reopened.command('/forget ' + key + ' 确认')
         self.assertNotIn(key, '\n'.join(m['content'] for m in reopened.context('plan')))
         self.assertIn('已隐藏', reopened.command('/memory'))
         reopened.command('/restore ' + key)
@@ -363,6 +369,7 @@ class MemoryTests(unittest.TestCase):
         key = next(iter(self.memory.state['entries']))
         self.backend.fail = True
         self.memory.command('/forget ' + key)
+        self.memory.command('/forget ' + key + ' 确认')
         self.backend.fail = False
         reopened = self.open()
         self.assertNotIn(key, '\n'.join(m['content'] for m in reopened.context('plan')))
@@ -372,6 +379,7 @@ class MemoryTests(unittest.TestCase):
         self.memory.save_item(entry(), self.memory.turns(), 0)
         key = next(iter(self.memory.state['entries']))
         self.memory.command('/forget ' + key)
+        self.memory.command('/forget ' + key + ' 确认')
         original = self.backend.call
         self.backend.call = lambda name, args: '合并→' + key if name == 'hold' else original(name, args)
         self.memory.save_item(entry('fact 1'), self.memory.turns(), 0)
@@ -490,3 +498,4 @@ class MemoryTests(unittest.TestCase):
         for t in threads:
             t.join()
         self.assertEqual(sorted(results), [False, True])
+
