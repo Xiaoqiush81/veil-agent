@@ -280,7 +280,9 @@ class SearchThenSaveTests(unittest.TestCase):
         self.assertEqual(len(requests), 4)
         self.assertEqual(len([n for n, _ in self.backend.calls if n == 'hold']), 2)
         self.assertFalse(any('被拒绝' in line for line in output))
-        self.assertGreater(len(json.dumps(requests[2], ensure_ascii=False).encode('utf-8')), 24000)
+        request_bytes = len(json.dumps(requests[2], ensure_ascii=False).encode('utf-8'))
+        self.assertGreater(request_bytes, 24000)
+        self.assertLess(int(request_bytes * self.rate), self.cfg.provider['max_input_tokens'])
 
     def test_a_request_that_really_is_too_large_still_stops_before_saving(self):
         huge = self.message([self.call('hold', {'title': 't', 'content': 'c'}, 'h1')], reasoning='长' * 20000)
