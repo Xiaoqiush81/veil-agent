@@ -1,21 +1,23 @@
 # 交接
 
-更新：2026-10-19 14:50 UTC · Claude
+更新：2026-10-19 16:03 UTC · Codex
 
 ## 做到哪
 
-- 006（文件工具）经 008 修复后，lan 在 Windows 上六项验收全部通过。
-- 007 已实施在分支 `ticket/007-ombre-native`：`memory_native.py` 给 Peter 两个 Ombre 工具（`hold`、`breath_search`），走 006 的工具循环和预算；`[memory] mode = "native" | "extract"` 一行切换新旧方案，旧补记层一行没删。`Memory.record_native` 把 Peter 自己存的条目登记进 `state.jsonl`，所以 `/memory` `/forget` `/delete` 照常。新增 `tests/test_native_memory.py`（10 项，假后端）。
-- 007c：lan 真实验收发现 `breath_search` ×2 后 `hold` 被“工具调用记录超过长度上限”拒绝；根因是字节数当 token 数估算（见 `STATUS.md`），修在 `veil_agent.py` 的 `_tool_chat`（按模型返回的真实 prompt 用量校准字节到 token 的比例，下限 0.5，余量 2 倍）。分支 `ticket/007c-tool-record`。需 lan 在真实 DeepSeek 思考模式下复测；若仍被拒，屏幕会显示估算、上限、实测比例三个数，按这三个数继续查。
-- 007d：Ombre 日志级别原为 CRITICAL（所以 `_agent/process.log`、`server.log` 空白），改为 WARNING；“记忆检索降级为关键词”只在 Ombre 正式提示出现时显示，附工具名和日志位置，原先过松的词匹配会误报。向量检索本身未动。分支 `ticket/007d-degrade-notice`。待 lan 复测并看 `server.log` 里 “semantic search failed”。
-- 本机沙箱没有 npm 网络，`test_real_filesystem_server_lists_only_the_sandbox_folder` 在这里本来就失败（主分支上同样），以 CI 的 Windows 结果为准。
-- `characters/peter/character.toml` 的 `thinking="enabled"` 是 lan 的本机未提交设置，不要纳入 PR（本 PR 只改了 `[memory]` 加 `mode`）。
+- 分支 `ticket/009-memory-identity-merge` 基于已拉取的 main `42a95ff`。工单为 `docs/tickets/009-memory-identity-merge.md`。
+- `memory_native.py` 将 `breath_search` 命中的 ID、标题和本地原始正文一并交给 Peter；带 `target_id` 的 `hold` 只接受本轮可见搜索结果，可把 `merge_ids` 中的多个命中正文逐字整合到目标编号，再追加新细节。目标标题不变，来源条目保留。
+- `memory_agent.py` 从本地 Ombre frontmatter 解析旧记忆标题；隐藏需针对具体编号二次确认；归档删除可用 `/restore` 恢复。
+- Ombre 的内置 `hold` 已使用原文追加处理同事件，不修改 `.deps/ombre`；没有变更 extract 旧实现或记忆数据。
+- 已同步更新 `STATUS.md`、`HANDOFF.md` 和工单验收步骤。尚未做真实聊天验收，也尚未创建 PR。
 
-## 下一步
+## 下一个窗口第一步
 
-lan 用真实对话对照新旧方案（步骤见 `STATUS.md`）。达标后另开工单移除旧补记层（`memory_agent.py` 的 extract/supplement、相关测试和 README 段落）；不达标就先列差距。不要在她验收前删旧代码或给旧补记层加东西。
+先检查本分支工作树和差异，保留已有的本机配置改动不进提交；做静态复核及仓库要求的验证，提交并推送本分支，创建包含状态文件的单一 PR。
 
 ## 注意
 
-- 文件工具只允许角色工作区；文件读取结果和路径不要写进长期记忆。写入必须先询问，且只能独占新建。
-- 005c–005g 的真实聊天验收仍待 lan。费用相关取舍（限制保存次数、关 Ombre 模型等）先问 lan，并说明每天多/少多少钱。
+- Peter 只能通过 `hold` 和 `breath_search` 访问记忆；没有把 `trace`、隐藏或删除操作开放给模型。
+- 记忆写入按精确编号定位；模型只提供新增细节和待整合编号，程序读取 Ombre 原始正文并拼接，避免重写旧文字。隐藏与删除仍逐条确认，恢复路径由用户控制。
+- 真实聊天验收通过之前，extract 模式和对应代码必须保留。
+- 不要把 `characters/peter/character.toml` 的本机未提交改动放进 PR。
+
