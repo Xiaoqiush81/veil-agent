@@ -128,9 +128,28 @@ class NativeMemoryTests(unittest.TestCase):
     def test_search_hides_forgotten_memories_and_truncates(self):
         self.tools.invoke('hold', {'title': 'a', 'content': 'lamp memory'})
         key = next(iter(self.memory.state['entries']))
+        bucket_file = Path(self.temp.name) / 'data/fake/memory/dynamic/general' / f'memory_{key}.md'
+        bucket_file.parent.mkdir(parents=True, exist_ok=True)
+        bucket_file.write_text(f'---\nid: {key}\ntitle: a\n---\nlamp memory', encoding='utf-8')
+        original_call = self.backend.call
+
+        def persist_fake_trace(name, args):
+            result = original_call(name, args)
+            if name == 'trace' and 'content' in args:
+                bucket_file.write_text(
+                    f'---\nid: {key}\ntitle: a\n---\n' + args['content'], encoding='utf-8')
+            return result
+        self.backend.call = persist_fake_trace
         text, state, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
         self.assertIn('lamp memory', text)
+        self.assertIn(f'记忆编号: {key}', text)
+        self.assertIn('标题: a', text)
+        self.tools.invoke('hold', {'target_id': key, 'content': 'It was a gift from her sister.'})
+        self.assertEqual(len(self.backend.rows), 1)
+        self.assertIn('lamp memory', self.backend.rows[key]['content'])
+        self.assertIn('It was a gift from her sister.', self.backend.rows[key]['content'])
         self.memory.command(f'/forget {key}')
+        self.memory.command(f'/forget {key} 确认')
         text, _, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
         self.assertEqual(text, '没有找到相关记忆。')
         self.tools.invoke('hold', {'title': 'b', 'content': 'long ' * 200})
@@ -140,10 +159,12 @@ class NativeMemoryTests(unittest.TestCase):
     def test_forget_and_delete_still_work_on_memories_peter_saved(self):
         self.tools.invoke('hold', {'title': 'Blue lamp', 'content': 'A gift lamp.'})
         key = next(iter(self.memory.state['entries']))
-        self.assertIn('已隐藏', self.memory.command(f'/forget {key}'))
+        self.assertIn('要隐藏这条记忆吗', self.memory.command(f'/forget {key}'))
+        self.assertIn('已隐藏', self.memory.command(f'/forget {key} 确认'))
         self.assertIn('已恢复', self.memory.command(f'/restore {key}'))
         self.assertIn('确认请输入', self.memory.command(f'/delete {key}'))
         self.assertIn('已删除', self.memory.command(f'/delete {key} 确认'))
+        self.assertIn('已恢复删除的记忆', self.memory.command(f'/restore {key}'))
 
     def test_only_the_two_memory_tools_are_offered_and_delete_is_not_one_of_them(self):
         self.assertEqual({t['function']['name'] for t in permitted_tools(self.tools.tools)},
@@ -286,3 +307,4 @@ class DegradedNoticeTests(unittest.TestCase):
         body = '[bucket_id:a] 头部\n[检索降级：语义索引暂不可用，本次仅使用关键词/BM25。] 这是记忆正文里抄的一句话。'
         self.assertEqual(self.search(body), [])
         self.assertEqual(self.search(''), [])
+
