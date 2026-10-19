@@ -128,9 +128,28 @@ class NativeMemoryTests(unittest.TestCase):
     def test_search_hides_forgotten_memories_and_truncates(self):
         self.tools.invoke('hold', {'title': 'a', 'content': 'lamp memory'})
         key = next(iter(self.memory.state['entries']))
+        bucket_file = Path(self.temp.name) / 'data/fake/memory/dynamic/general' / f'memory_{key}.md'
+        bucket_file.parent.mkdir(parents=True, exist_ok=True)
+        bucket_file.write_text(f'---\nid: {key}\ntitle: a\n---\nlamp memory', encoding='utf-8')
+        original_call = self.backend.call
+
+        def persist_fake_trace(name, args):
+            result = original_call(name, args)
+            if name == 'trace' and 'content' in args:
+                bucket_file.write_text(
+                    f'---\nid: {key}\ntitle: a\n---\n' + args['content'], encoding='utf-8')
+            return result
+        self.backend.call = persist_fake_trace
         text, state, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
         self.assertIn('lamp memory', text)
+        self.assertIn(f'记忆编号: {key}', text)
+        self.assertIn('标题: a', text)
+        self.tools.invoke('hold', {'target_id': key, 'content': 'It was a gift from her sister.'})
+        self.assertEqual(len(self.backend.rows), 1)
+        self.assertIn('lamp memory', self.backend.rows[key]['content'])
+        self.assertIn('It was a gift from her sister.', self.backend.rows[key]['content'])
         self.memory.command(f'/forget {key}')
+        self.memory.command(f'/forget {key} 确认')
         text, _, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
         self.assertEqual(text, '没有找到相关记忆。')
         self.tools.invoke('hold', {'title': 'b', 'content': 'long ' * 200})
@@ -140,10 +159,38 @@ class NativeMemoryTests(unittest.TestCase):
     def test_forget_and_delete_still_work_on_memories_peter_saved(self):
         self.tools.invoke('hold', {'title': 'Blue lamp', 'content': 'A gift lamp.'})
         key = next(iter(self.memory.state['entries']))
-        self.assertIn('已隐藏', self.memory.command(f'/forget {key}'))
+        self.assertIn('要隐藏这条记忆吗', self.memory.command(f'/forget {key}'))
+        self.assertIn('已隐藏', self.memory.command(f'/forget {key} 确认'))
         self.assertIn('已恢复', self.memory.command(f'/restore {key}'))
         self.assertIn('确认请输入', self.memory.command(f'/delete {key}'))
         self.assertIn('已删除', self.memory.command(f'/delete {key} 确认'))
+        self.assertIn('已恢复删除的记忆', self.memory.command(f'/restore {key}'))
+
+    def test_restore_keeps_hidden_state_until_ombre_unhides_the_archived_memory(self):
+        self.tools.invoke('hold', {'title': 'Blue lamp', 'content': 'A gift lamp.'})
+        key = next(iter(self.memory.state['entries']))
+        self.memory.command(f'/forget {key}')
+        self.memory.command(f'/forget {key} 确认')
+        self.memory.command(f'/delete {key}')
+        self.memory.command(f'/delete {key} 确认')
+        original_call = self.backend.call
+        fail_unhide = True
+
+        def fail_unhide_once(name, args):
+            if name == 'trace' and args.get('dont_surface') == 0 and fail_unhide:
+                raise RuntimeError('fictional unhide failure')
+            return original_call(name, args)
+
+        self.backend.call = fail_unhide_once
+        self.assertIn('取消隐藏失败', self.memory.command(f'/restore {key}'))
+        self.assertFalse(self.backend.rows[key]['deleted'])
+        self.assertTrue(self.memory.state['entries'][key]['hidden'])
+        self.assertEqual(self.memory.visible([(key, 'lamp')]), [])
+
+        fail_unhide = False
+        self.assertIn('已恢复', self.memory.command(f'/restore {key}'))
+        self.assertFalse(self.memory.state['entries'][key]['hidden'])
+        self.assertEqual(self.memory.visible([(key, 'lamp')]), [(key, 'lamp')])
 
     def test_only_the_two_memory_tools_are_offered_and_delete_is_not_one_of_them(self):
         self.assertEqual({t['function']['name'] for t in permitted_tools(self.tools.tools)},
@@ -233,7 +280,9 @@ class SearchThenSaveTests(unittest.TestCase):
         self.assertEqual(len(requests), 4)
         self.assertEqual(len([n for n, _ in self.backend.calls if n == 'hold']), 2)
         self.assertFalse(any('被拒绝' in line for line in output))
-        self.assertGreater(len(json.dumps(requests[2], ensure_ascii=False).encode('utf-8')), 32768)
+        request_bytes = len(json.dumps(requests[2], ensure_ascii=False).encode('utf-8'))
+        self.assertGreater(request_bytes, 24000)
+        self.assertLess(int(request_bytes * self.rate), self.cfg.provider['max_input_tokens'])
 
     def test_a_request_that_really_is_too_large_still_stops_before_saving(self):
         huge = self.message([self.call('hold', {'title': 't', 'content': 'c'}, 'h1')], reasoning='长' * 20000)
@@ -286,3 +335,4 @@ class DegradedNoticeTests(unittest.TestCase):
         body = '[bucket_id:a] 头部\n[检索降级：语义索引暂不可用，本次仅使用关键词/BM25。] 这是记忆正文里抄的一句话。'
         self.assertEqual(self.search(body), [])
         self.assertEqual(self.search(''), [])
+

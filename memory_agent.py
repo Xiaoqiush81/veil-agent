@@ -1,5 +1,6 @@
 """Thin Ombre integration. Memory content and scheduling stay in the role vault."""
 import asyncio
+import ast
 from concurrent.futures import Future
 from contextlib import contextmanager
 from dataclasses import replace
@@ -303,6 +304,8 @@ class Memory:
         self.mutex = threading.RLock()
         self.messages = queue.Queue()
         self.jobs = queue.Queue()
+        self.forget_asked = None  # Specific memory waiting for explicit hide confirmation.
+        self.bucket_details_cache = {}
         try:
             self.opening = self.call('breath', {})
         except Exception as exc:
@@ -334,9 +337,9 @@ class Memory:
     def call(self, name, args):
         self.last_tool = name
         reservation = None
-        if name in {'hold', 'breath_search', 'feel'}:
-            # A hold can query for deduplication and index its body; reserve both
-            # with the upstream SDK's initial attempt plus two internal retries.
+        if name in {'hold', 'breath_search', 'feel'} or (name == 'trace' and args.get('content') is not None):
+            # Memory writes and searches may embed content; reserve conservatively
+            # for the upstream SDK's initial attempt plus two internal retries.
             tokens = 12 * max(8192, len(json.dumps(args, ensure_ascii=False).encode('utf-8')) + 2048)
             reservation = self.budget.estimate(self.cfg.id, self.cfg.memory['model'], tokens,
                                               self.cfg.memory['input_cny_per_million'])
@@ -362,6 +365,82 @@ class Memory:
             hidden = {k for k, v in self.state['entries'].items() if v.get('hidden')}
             parents = set(self.state['sources'].values())
             return [(k, text) for k, text in candidates if k not in hidden and k not in parents]
+
+    @staticmethod
+    def _frontmatter_scalar(value):
+        scalar = value.strip()
+        if scalar.startswith('"'):
+            try:
+                scalar = ast.literal_eval(scalar)
+            except (SyntaxError, ValueError):
+                pass
+        elif scalar.startswith("'") and scalar.endswith("'"):
+            scalar = scalar[1:-1].replace("''", "'")
+        return str(scalar)
+
+    def bucket_details(self, memory_id, *, refresh=False):
+        """Resolve an Ombre title and exact body from its role-local Markdown record."""
+        if not refresh and memory_id in self.bucket_details_cache:
+            return self.bucket_details_cache[memory_id]
+        vault = self.store.root / self.cfg.id / 'memory'
+        try:
+            paths = list(vault.rglob('*.md'))
+            named = [p for p in paths
+                     if p.stem == memory_id or p.stem.endswith('_' + memory_id)]
+            candidates = [*named, *(p for p in paths if p not in named)]
+            for index, path in enumerate(candidates):
+                raw = path.read_text(encoding='utf-8')
+                lines = raw.splitlines(keepends=True)
+                if not lines or lines[0].strip() != '---':
+                    continue
+                end = next((i for i, line in enumerate(lines[1:], start=1)
+                            if line.strip() == '---'), len(lines))
+                header = lines[1:end]
+                values = {}
+                for line in header:
+                    key, sep, value = line.partition(':')
+                    if sep and key.strip() in {'id', 'title', 'name'}:
+                        values[key.strip()] = self._frontmatter_scalar(value)
+                if values.get('id') and values['id'] != memory_id:
+                    continue
+                if not values.get('id') and index >= len(named):
+                    continue
+                body = ''.join(lines[end + 1:]) if end < len(lines) else ''
+                details = (values.get('title') or values.get('name'), body)
+                self.bucket_details_cache[memory_id] = details
+                return details
+        except OSError:
+            pass
+        self.bucket_details_cache[memory_id] = (None, None)
+        return None, None
+
+    def title_for(self, memory_id):
+        """Resolve a result's display title from its Ombre record or local state."""
+        title, _ = self.bucket_details(memory_id)
+        if title:
+            return title
+        entry = self.state['entries'].get(memory_id)
+        return str(entry['title']) if entry and entry.get('title') else None
+
+    def content_for(self, memory_id, *, refresh=False):
+        """Return exact stored content, never a rendered search snippet."""
+        _, content = self.bucket_details(memory_id, refresh=refresh)
+        return content
+
+    def record_native_update(self, memory_id, content):
+        """Keep the local command index in step with a lossless native update."""
+        with self.mutex:
+            previous = self.state['entries'].get(memory_id, {})
+            entry = {'title': previous.get('title') or self.title_for(memory_id) or memory_id,
+                     'time': previous.get('time') or self.budget.clock(),
+                     'signature': previous.get('signature'), 'hidden': bool(previous.get('hidden')),
+                     'text': content[:600], 'native': True, 'updated': self.budget.clock()}
+            for flag in ('deleted', 'delete_pending'):
+                if previous.get(flag):
+                    entry[flag] = True
+            self.state['entries'][memory_id] = entry
+            self.persist()
+            self.bucket_details_cache[memory_id] = (entry['title'], content)
 
     def context(self, query):
         try:
@@ -603,6 +682,7 @@ class Memory:
                 if previous.get('delete_pending'):
                     self.state['entries'][memory_id]['delete_pending'] = True
             self.persist()
+            self.bucket_details_cache.pop(memory_id, None)
         self.messages.put(f'📝 {self.cfg.name} 记下了：{item["title"][:40]}')
         return 'saved'
 
@@ -619,6 +699,7 @@ class Memory:
                     entry[flag] = True
             self.state['entries'][memory_id] = entry
             self.persist()
+            self.bucket_details_cache.pop(memory_id, None)
         return '新建' if kind == 'feel' else kind
 
     def update_item(self, item, content, signature):
@@ -634,6 +715,7 @@ class Memory:
         with self.mutex:
             entry.update(signature=signature, text=item['zh'][:600], updated=self.budget.clock())
             self.persist()
+            self.bucket_details_cache.pop(target, None)
         self.messages.put(f'📝 {self.cfg.name} 补充了记忆：{entry["title"][:40]}')
         return 'saved'
 
@@ -670,7 +752,7 @@ class Memory:
                     lost = []
                 for row in lost:
                     lines.append(f'被丢弃的候选：{row["time"]} 「{row["title"]}」{row["why"]}')
-                lines.append('隐藏：/forget 编号；恢复：/restore 编号；删除：/delete 编号。隐藏和删除都不会擦掉最近聊天原文。')
+                lines.append('隐藏：/forget 编号，再按提示确认；恢复：/restore 编号；删除：/delete 编号，再按提示确认。')
                 return '\n'.join(lines)
             command, _, key = text.partition(' ')
             key = key.strip()
@@ -678,12 +760,39 @@ class Memory:
             if command == '/delete' and key.endswith(' 确认'):
                 key = key[:-3].strip()
                 confirmed = key == self.delete_asked
+            forget_confirm = False
+            if command == '/forget' and key.endswith(' 确认'):
+                key = key[:-3].strip()
+                forget_confirm = key == self.forget_asked
+                self.forget_asked = None
+                if not forget_confirm:
+                    return '确认编号不匹配；没有隐藏任何记忆。'
             entry = self.state['entries'].get(key)
             retry = bool(entry and entry.get('deleted') and entry.get('delete_pending') and command == '/delete')
-            if entry is None or (entry.get('deleted') and not retry):
+            if entry is None or (entry.get('deleted') and not retry and command != '/restore'):
                 return '没有这个记忆编号；输入 /memory 查看。'
             if command == '/delete':
                 return self.delete(key, entry, confirmed or retry)
+            if command == '/restore' and entry.get('deleted'):
+                try:
+                    self.call('trace', {'bucket_id': key, 'restore': True})
+                except Exception:
+                    return '这次没能确认恢复；记忆库记录仍保留，可稍后重试。'
+                entry.pop('deleted', None)
+                entry.pop('delete_pending', None)
+                self.persist()
+                try:
+                    self.call('trace', {'bucket_id': key, 'dont_surface': 0})
+                except Exception:
+                    return '已恢复归档，但取消隐藏失败；记忆仍保留，可稍后重试 /restore。'
+                entry['hidden'] = False
+                self.persist()
+                return '已恢复删除的记忆。'
+            if command == '/forget':
+                if not forget_confirm:
+                    self.forget_asked = key
+                    return (f'要隐藏这条记忆吗：{key} | {entry["title"]}\n'
+                            f'确认请输入：/forget {key} 确认。隐藏后可用 /restore {key} 恢复。')
             hidden = command == '/forget'
             if hidden:
                 self.state['entries'][key]['hidden'] = True
@@ -713,3 +822,4 @@ class Memory:
         self.persist()
         self.messages.put(f'🗑 {self.cfg.name} 的记忆已删除：{title[:40]}')
         return f'已删除：{title}'
+
