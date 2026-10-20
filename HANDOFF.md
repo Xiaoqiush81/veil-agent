@@ -1,18 +1,20 @@
 # 交接
 
-更新：2026-10-21 00:02 +08:00 · Claude · 024、025 工单已写（025 加入待删除栏目）
+更新：2026-10-21 00:03 +08:00 · Codex · 024 PR #53 已同步最新 main
 
 ## 做到哪
 
-- 023 PR #50 已合并（main `18ce081`），022 PR #49 已合并；021/022/023 待 lan Windows 验收。
-- 024 Ombre 完整版常驻工单已写：`docs/tickets/024-ombre-resident.md`，交给 Codex，分支 `ticket/024-ombre-resident`。
+- PR [#53](https://github.com/yecays-ai/veil-agent/pull/53) 分支 `ticket/024-ombre-resident` 已吸收最新 main `d2398f5`（025 加入独处时的待删除栏目）；分支的功能改动仍只限 024。GitHub CI 正在运行，CodeRabbit 已触发评审。
+- Ombre HTTP 常驻进程、每记忆目录互斥锁、静态 MCP Token、首次备份、面板按钮、Peter 能力变化提示均已实现。面板历史导入、脱水模型连通性测试、向量连通性测试、编辑正文重建向量可能直接产生预算外模型/向量费用；面板普通浏览、置顶和归档不调用模型。
+- 定向套件 87 项通过、2 项可选集成跳过。全量离线套件因沙箱禁止临时目录和 localhost sockets 出现环境错误；真实 Windows 启动→聊天→面板→退出→重启未验证。
 
 ## 下一步
 
-1. Codex 按 024 施工，先读工单里的「施工规矩」。024 验收通过后再做 025（`docs/tickets/025-ombre-more-tools.md`）。
-2. lan 验收 021/022/023：更新 main，点「退出服务」，再双击 `start-web.bat`，按 STATUS.md 步骤。
+1. 查看 PR #53 当前 CI/CodeRabbit 结果；只处理功能错误或安全风险。
+2. 无本地 GitHub 网络，后续远端操作继续走 GitHub 集成；没有 PR 合并或用户验收记录前，不得标记已合并/验收。
+3. 合并后 lan 按 `STATUS.md` 的工单 024 Windows 步骤体验验收；024 验收通过后再按 main 状态开工单 025（包括独处删除待处理）。另有 021/022/023 Windows 验收待完成。
 
 ## 注意
 
 - 每个 PR 必须更新 `STATUS.md` 和 `HANDOFF.md`。
-- 不改模型或预算上限、不读取或改写真实记忆、聊天、人设和账本。
+- 不改模型或预算上限，不读取或改写真实记忆、聊天、人设和账本。真实本机流程目前未验证；不得把自动测试说成体验验收。
