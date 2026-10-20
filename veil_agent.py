@@ -231,6 +231,35 @@ def load_character(root, character_id):
         raise UserError('角色配置无法读取或字段无效，请检查 character.toml。') from exc
 
 
+class ActivityState:
+    """Persist the user-controlled 4B activity switch; this does not run tasks."""
+
+    def __init__(self, path):
+        self.path = Path(path)
+        self.lock = threading.RLock()
+
+    def enabled(self):
+        with self.lock:
+            try:
+                value = json.loads(self.path.read_text(encoding='utf-8'))
+                return value.get('enabled') is True
+            except FileNotFoundError:
+                return False
+            except (ValueError, UnicodeError, AttributeError):
+                return False
+
+    def set(self, enabled):
+        with self.lock:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(self.path.suffix + '.tmp')
+            with tmp.open('w', encoding='utf-8', newline='\n') as handle:
+                handle.write(json.dumps({'enabled': bool(enabled)}) + '\n')
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp, self.path)
+            return bool(enabled)
+
+
 class Budget:
     def __init__(self, store, daily=Decimal('10'), monthly=Decimal('300'), clock=now):
         self.mutex = threading.RLock()
@@ -799,8 +828,9 @@ def drop_typeahead():
     return dropped
 
 
-def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead):
-    output(f'接上了 {chat.rounds} 轮。输入 /cost 查花费，/self 看当前说明，/quit 退出。')
+def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead, activity=None):
+    activity = activity or ActivityState(chat.store.root / chat.cfg.id / 'resident-state.json')
+    output(f'接上了 {chat.rounds} 轮。输入 /cost 查花费，/self 看当前说明，/pause 或 /resume 切换自主活动，/quit 退出。')
     if getattr(chat.tools, 'startup_notice', None):
         output(chat.tools.startup_notice)
     if chat.pending_capability_event:
@@ -818,7 +848,13 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead):
             text = input_fn('你: ').strip()
             if text == '/quit':
                 break
-            if text == '/cost':
+            if text == '/pause':
+                activity.set(False)
+                output('自主活动已暂停。')
+            elif text == '/resume':
+                activity.set(True)
+                output('自主活动已开启；当前版本不会运行自主任务。')
+            elif text == '/cost':
                 output(chat.budget.display())
                 output(chat.budget.cache_display())
             elif text == '/self':

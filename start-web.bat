@@ -1,6 +1,5 @@
 @echo off
 setlocal
-chcp 65001 >nul
 cd /d "%~dp0"
 set PYTHONUTF8=1
 if not exist ".venv\Scripts\python.exe" (
@@ -8,5 +7,5 @@ if not exist ".venv\Scripts\python.exe" (
   pause
   exit /b 1
 )
-".venv\Scripts\python.exe" web_agent.py %*
-if errorlevel 1 pause
+".venv\Scripts\python.exe" web_launcher.py %*
+

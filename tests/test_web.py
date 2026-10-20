@@ -11,7 +11,7 @@ from pathlib import Path
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
-from veil_agent import Budget, Chat, Store, load_character, run_chat
+from veil_agent import ActivityState, Budget, Chat, Store, load_character, run_chat
 from web_agent import Hub, serve_chat, start_server
 
 TOKEN = 'test-token'
@@ -47,7 +47,7 @@ output_cny_per_million = "8"
         self.cfg = load_character(root, 'test')
         self.store = Store(root / 'data')
         self.model = Mock(return_value=('A fictional reply', 100, 20, 10))
-        self.hub = Hub('Test')
+        self.hub = Hub('Test', ActivityState(self.store.root / 'test' / 'resident-state.json'))
         self.request_number = 0
         self.port = free_port()
         self.server = start_server(self.hub, TOKEN, self.port)
@@ -72,7 +72,7 @@ output_cny_per_million = "8"
             return exc.code, None
 
     def test_submission_deduplication_window_is_bounded(self):
-        hub = Hub('Test')
+        hub = Hub('Test', ActivityState(self.store.root / 'test' / 'other-state.json'))
         with patch('web_agent.MAX_SUBMISSIONS', 2):
             for text, request_id in (('one', 'one'), ('two', 'two')):
                 hub.busy = False
@@ -117,6 +117,51 @@ output_cny_per_million = "8"
         self.assertEqual(self.call('/api/events', origin='http://evil.example')[0], 403)
         self.assertEqual(self.call('/api/send', {'text': 'x'}, token='wrong')[0], 403)
         self.assertEqual(self.call('/api/events')[0], 200)
+        self.model.assert_not_called()
+
+    def test_ephemeral_port_uses_actual_port_for_host_validation(self):
+        server = start_server(self.hub, TOKEN, 0)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/events',
+                                     headers={'X-Token': TOKEN})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            self.assertEqual(response.status, 200)
+
+    def test_activity_toggle_is_authorized_persistent_and_task_free(self):
+        status, state = self.call('/api/events')
+        self.assertEqual(status, 200)
+        self.assertFalse(state['activity_enabled'])
+        self.assertNotIn('token', state)
+        self.assertEqual(self.call('/api/activity', {'enabled': True}, token='wrong')[0], 403)
+        self.assertFalse(self.hub.activity.enabled())
+        self.assertEqual(self.call('/api/activity', {'enabled': True})[0], 200)
+        reopened = ActivityState(self.store.root / 'test' / 'resident-state.json')
+        self.assertTrue(reopened.enabled())
+        self.assertEqual(self.call('/api/activity', {'enabled': False})[0], 200)
+        self.assertFalse(reopened.enabled())
+
+    def test_explicit_exit_stops_new_submissions(self):
+        self.assertEqual(self.call('/api/exit', {})[0], 200)
+        self.assertTrue(self.hub.stopped)
+        self.assertEqual(self.call('/api/send', {'text': 'not sent'})[0], 409)
+
+    def test_terminal_pause_commands_are_persisted_without_model_calls(self):
+        results = {}
+
+        def scenario(_):
+            self.assertTrue(self.wait(lambda: not self.call('/api/events')[1]['busy']))
+            self.assertEqual(self.call('/api/send', {'text': '/resume'})[0], 200)
+            self.assertTrue(self.wait(lambda: not self.call('/api/events')[1]['busy']))
+            self.assertTrue(self.hub.activity.enabled())
+            self.assertEqual(self.call('/api/send', {'text': '/pause'})[0], 200)
+            self.assertTrue(self.wait(lambda: not self.call('/api/events')[1]['busy']))
+            results['paused'] = not self.hub.activity.enabled()
+            self.call('/api/send', {'text': '/quit'})
+
+        self.run_loop(scenario)
+        self.assertTrue(results['paused'])
         self.model.assert_not_called()
 
     def test_message_round_trip_and_commands(self):
@@ -288,6 +333,22 @@ class PacingTests(unittest.TestCase):
         result = subprocess.run([shutil.which('node'), str(Path(__file__).with_name('web_pacing.cjs'))],
                                 capture_output=True, text=True, timeout=15)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class StartupErrorTests(unittest.TestCase):
+    def test_detached_service_leaves_startup_reason_for_launcher(self):
+        import web_agent
+        import web_launcher
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch.object(web_agent, 'ROOT', root):
+                self.assertEqual(web_agent.main(['--character', 'missing', '--no-browser']), 1)
+            error = root / 'data' / 'web_service_error.txt'
+            self.assertTrue(error.read_text(encoding='utf-8').strip())
+            with patch.object(web_launcher, 'STARTUP_ERROR', error):
+                message = web_launcher.startup_error()
+            self.assertIn(error.read_text(encoding='utf-8').strip(), message)
+            self.assertTrue(message.startswith(web_launcher.FAILED))
 
 
 if __name__ == '__main__':

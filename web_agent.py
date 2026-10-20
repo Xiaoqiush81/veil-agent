@@ -19,8 +19,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from veil_agent import (ROOT, Budget, Chat, Store, UserError, load_character, now,
-                        make_model, run_chat)
+from veil_agent import (ROOT, ActivityState, Budget, Chat, Store, UserError,
+                        load_character, now, make_model, run_chat)
 
 PAGE = Path(__file__).resolve().parent / 'web' / 'index.html'
 MAX_BODY = 200_000
@@ -30,8 +30,9 @@ MAX_SUBMISSIONS = 1024
 class Hub:
     """Message list shared by the chat loop (main thread) and HTTP handlers."""
 
-    def __init__(self, name):
+    def __init__(self, name, activity):
         self.name = name
+        self.activity = activity
         self.events = []
         self.busy = True          # true until the loop is waiting for input
         self.stopped = False
@@ -74,6 +75,11 @@ class Hub:
                 self.busy = True
             return text
 
+    def stop(self):
+        with self.cond:
+            self.stopped = True
+            self.cond.notify_all()
+
     def submit(self, text, request_id):
         text_digest = hashlib.sha256(text.encode('utf-8')).digest()
         # Check busy and register the accepted request atomically for all handlers.
@@ -91,7 +97,6 @@ class Hub:
                 self.submissions.popitem(last=False)
             self.inbox.put(text)
             return 'accepted'
-
     def approval(self, prompt):
         # Same sentence the terminal shows; the page offers two buttons for y/N.
         with self.cond:
@@ -124,13 +129,11 @@ class Hub:
     def snapshot(self, after):
         with self.cond:
             return {'events': self.events[after:], 'busy': self.busy, 'stopped': self.stopped,
-                    'name': self.name, 'pending': self.pending}
+                    'name': self.name, 'pending': self.pending,
+                    'activity_enabled': self.activity.enabled()}
 
 
-def make_handler(hub, token, port):
-    allowed_hosts = {f'127.0.0.1:{port}', f'localhost:{port}'}
-    allowed_origins = {f'http://{h}' for h in allowed_hosts}
-
+def make_handler(hub, token):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass  # never log requests: URLs carry the token
@@ -147,6 +150,9 @@ def make_handler(hub, token, port):
             self.wfile.write(data)
 
         def _guard(self, supplied):
+            port = self.server.server_address[1]
+            allowed_hosts = {f'127.0.0.1:{port}', f'localhost:{port}'}
+            allowed_origins = {f'http://{h}' for h in allowed_hosts}
             if self.headers.get('Host') not in allowed_hosts:
                 self._send(403, {'error': 'host'})
                 return False
@@ -213,6 +219,18 @@ def make_handler(hub, token, port):
                     self._send(409, {'error': 'no such pending approval'})
                 else:
                     self._send(200, {'ok': True})
+            elif url.path == '/api/activity':
+                enabled = body.get('enabled')
+                if not isinstance(enabled, bool):
+                    self._send(400, {'error': 'enabled'})
+                else:
+                    hub.activity.set(enabled)
+                    self._send(200, {'ok': True, 'enabled': enabled})
+            elif url.path == '/api/exit':
+                try:
+                    self._send(200, {'ok': True})
+                finally:
+                    hub.stop()
             else:
                 self._send(404, {'error': 'not found'})
 
@@ -220,7 +238,7 @@ def make_handler(hub, token, port):
 
 
 def start_server(hub, token, port):
-    server = ThreadingHTTPServer(('127.0.0.1', port), make_handler(hub, token, port))
+    server = ThreadingHTTPServer(('127.0.0.1', port), make_handler(hub, token))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -228,7 +246,33 @@ def start_server(hub, token, port):
 def serve_chat(chat, hub):
     for message in chat.history_events:
         hub.push(message['role'], message['content'], time=message['time'], history=True)
-    run_chat(chat, input_fn=hub.input_fn, output=hub.output, drop=lambda: False)
+    run_chat(chat, input_fn=hub.input_fn, output=hub.output, drop=lambda: False,
+             activity=hub.activity)
+
+
+def save_endpoint(path, port, token):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps({'port': port, 'token': token}), encoding='utf-8')
+    tmp.replace(path)
+
+
+def clear_endpoint(path, token):
+    try:
+        current = json.loads(path.read_text(encoding='utf-8'))
+        if hmac.compare_digest(str(current.get('token', '')).encode(), token.encode()):
+            path.unlink(missing_ok=True)
+    except (OSError, ValueError, UnicodeError, AttributeError):
+        pass
+
+
+def save_startup_error(path, message):
+    # The detached service has no console; the launcher shows this text instead.
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(message, encoding='utf-8')
+    except OSError:
+        pass
 
 
 def main(argv=None):
@@ -237,24 +281,30 @@ def main(argv=None):
             stream.reconfigure(encoding='utf-8')
     parser = argparse.ArgumentParser(description='VEIL 本机网页聊天')
     parser.add_argument('--character', default='peter')
-    parser.add_argument('--port', type=int, default=8765)
+    parser.add_argument('--port', type=int, default=0)
     parser.add_argument('--no-browser', action='store_true')
     args = parser.parse_args(argv)
     hub = None
+    token = None
+    server = None
+    endpoint_path = ROOT / 'data' / 'web_service.json'
+    error_path = ROOT / 'data' / 'web_service_error.txt'
     try:
         store = Store(ROOT / 'data')
         with store.lock():
             budget = Budget(store)
             cfg = load_character(ROOT, args.character)
             client, model = make_model(ROOT, cfg)
-            hub = Hub(cfg.name)
+            activity = ActivityState(store.root / cfg.id / 'resident-state.json')
+            hub = Hub(cfg.name, activity)
             token = secrets.token_urlsafe(24)
             try:
                 server = start_server(hub, token, args.port)
             except OSError:
-                raise UserError(f'端口 {args.port} 被占用：可能已经开着一个网页聊天；请关掉它，或加 --port 换一个端口。')
-            url = f'http://127.0.0.1:{args.port}/?t={token}'
-            print(f'网页聊天已启动（只在本机可访问）。浏览器没自动打开的话，请复制这个地址：\n{url}')
+                raise UserError('网页服务未能启动；请稍后重试。')
+            port = server.server_address[1]
+            save_endpoint(endpoint_path, port, token)
+            url = f'http://127.0.0.1:{port}/?t={token}'
             if not args.no_browser:
                 webbrowser.open(url)
             failed = False
@@ -279,27 +329,40 @@ def main(argv=None):
                                             approval=hub.approval, output=hub.output), hub)
             except UserError as exc:
                 hub.push('error', str(exc))
-                print(str(exc))
                 failed = True
             finally:
-                hub.stopped = True
+                hub.stop()
                 time.sleep(1.5)   # let an open page read the final state
-                server.shutdown()
         return 1 if failed else 0
     except UserError as exc:
         if hub:
             hub.push('error', str(exc))
             time.sleep(1.5)
+        if token:
+            clear_endpoint(endpoint_path, token)
         print(str(exc))
+        save_startup_error(error_path, str(exc))
     except ImportError:
         print('缺少运行依赖，请先按 README 完成安装。')
+        save_startup_error(error_path, '缺少运行依赖，请先按 README 完成安装。')
     except (OSError, UnicodeError):
         print('本机文件无法读写，已停止；请检查磁盘空间和文件权限。')
+        save_startup_error(error_path, '本机文件无法读写，已停止；请检查磁盘空间和文件权限。')
     except (KeyboardInterrupt, EOFError):
-        print('\n已退出。')
+        if hub:
+            hub.stop()
         return 0
+    finally:
+        if server:
+            if hub:
+                hub.stop()
+            server.shutdown()
+            server.server_close()
+        if token:
+            clear_endpoint(endpoint_path, token)
     return 1
 
 
 if __name__ == '__main__':
     raise SystemExit(main())
+

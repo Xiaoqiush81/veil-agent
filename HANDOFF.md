@@ -1,9 +1,13 @@
 # 交接
 
-更新：2026-10-20 18:38 +08:00 · Claude · 写好 020 常驻服务工单
+更新：2026-10-20 19:29 +08:00 · Claude · 020 审查补充启动失败提示
 
 ## 做到哪
 
+- Claude 审查（PR #44）：补充启动失败原因弹窗（`web_service_error.txt`，启动器 `startup_error()`）和测试 `test_detached_service_leaves_startup_reason_for_launcher`。
+- 工单 020：`ticket/020-resident-service`，PR #44。已实现分离启动进程、端点复用和过期 endpoint 自恢复；网页显示双状态、持久暂停/恢复与确认退出。实现未引入托盘、开机自启或自主任务。
+- PR #44 定向网页测试 15 项通过（假模型、临时数据）；最新 CI 四项全通过。CodeRabbit 首轮两条功能评论已修复、回复并解决线程。已在 PR 评论请求 Claude 和 CodeRabbit 增量审查，目前无后续回复；GitHub 拒绝将 `claude` 作为 reviewer（非仓库协作者）。Windows 真实体验未执行。
+- PR 远端分支通过 GitHub API 更新；本机 `.local-tmp/020-worktree` 仍基于较早的 `origin/main` 且有未提交改动。后续先以 PR 当前 head 同步/继续，勿把本地旧分支直接推到远端。原工作目录中 017 的未提交内容保持不变，施工在 `.local-tmp/020-worktree` 隔离目录。
 - 019 补充：`tools_agent.py` 的能力清单新增 `messaging`，send_message 上线或关闭时触发一次能力变化记录；新增测试 `test_existing_manifest_announces_send_message_once`。
 
 - 工单 `docs/tickets/019-multi-message.md`；独立 worktree 分支 `ticket/019-multi-message`，基于 main `38b8826`。用户明确要求旧目录及全部未提交改动原样保留，不覆盖、清理、stash 或提交；后续继续在本 worktree 操作。
@@ -19,9 +23,8 @@
 
 ## 下一步
 
-按 `docs/tickets/020-resident-service.md` 施工 020 常驻服务，分支 `ticket/020-resident-service`，基于 main。只做服务、状态和暂停开关，不加任何会自己运行的后台任务；托盘/开机自启动只调查。
-
-先核对 PR #41 的合并状态；合并后按 `STATUS.md` 的 019 步骤安排体验。旧启动目录尚未切到 019，不得切换或覆盖旧目录；启用新版本时仍需保留旧目录和用户文件。
+1. 等待 PR #44 对 Claude/CodeRabbit 增量审查请求的回复。Claude reviewer 指派因 `claude` 非仓库协作者被 GitHub 拒绝；请求评论已留在 PR。
+2. CodeRabbit 首轮功能问题已全部修复并解决，CI 四项通过。按审查结果处理合并；合并后请 lan 按 `STATUS.md` 做真实 Windows 验收，不能以 CI 代替。
 
 ## 注意
 
