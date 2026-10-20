@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -123,6 +124,35 @@ output_cny_per_million = "8"
         self.assertEqual(self.model.call_count, 1)
         self.assertGreater(Budget(Store(self.root / 'data')).totals()[2], 0)
 
+    def test_provider_failure_is_reported_and_chat_loop_continues_without_retry(self):
+        self.model.side_effect = [RuntimeError('private provider detail'),
+                                  ('A fictional reply', 100, 20, 10)]
+        output = []
+        run_chat(self.chat, Mock(side_effect=['first', 'second', '/quit']), output.append)
+        self.assertTrue(any('请求失败，未自动重试' in line for line in output))
+        self.assertIn('Test: A fictional reply', output)
+        self.assertEqual(self.model.call_count, 2)  # one call per explicit user message
+        saved = self.store.read('test/chat.jsonl')
+        self.assertEqual([m['content'] for m in saved if m['role'] == 'user'], ['first', 'second'])
+        self.assertEqual([m['content'] for m in self.chat.history if m['role'] == 'user'],
+                         ['first', 'second'])
+        self.assertGreater(Budget(Store(self.root / 'data')).totals()[2], 0)
+
+    def test_provider_failure_drops_terminal_typeahead_before_next_input(self):
+        self.model.side_effect = RuntimeError('private provider detail')
+        output = []
+        drop = Mock(return_value=True)
+        run_chat(self.chat, Mock(side_effect=['first', '/quit']), output.append, drop=drop)
+        self.assertIn('（等回复时打的字没有收到，请重新输入。）', output)
+        drop.assert_called_once_with()
+        self.assertEqual(self.model.call_count, 1)
+
+    def test_corrupt_ledger_still_stops_the_chat_loop(self):
+        self.store.append('costs.jsonl', {'type': 'reserve'})
+        with self.assertRaises(UserError):
+            run_chat(self.chat, Mock(side_effect=['hello']), lambda _: None)
+        self.model.assert_not_called()
+
     def test_roles_use_separate_history_but_share_budget(self):
         self.chat.send('private test')
         self.assertEqual(self.store.read('other/chat.jsonl'), [])
@@ -149,6 +179,25 @@ output_cny_per_million = "8"
             self.chat.send('hello')
         self.assertGreater(self.budget.totals()[2], 0)
         self.assertEqual(self.store.read('test/chat.jsonl')[-1]['content'], 'reply')
+
+    def test_model_integrity_error_stops_chat_instead_of_becoming_recoverable(self):
+        self.model.side_effect = UserError('usage missing')
+        with self.assertRaises(UserError) as raised:
+            run_chat(self.chat, Mock(side_effect=['hello', '/quit']), lambda _: None)
+        self.assertEqual(type(raised.exception), UserError)
+        self.assertEqual(self.model.call_count, 1)
+
+    def test_tool_model_integrity_error_is_not_wrapped_as_provider_failure(self):
+        tools = Mock()
+        tools.tools = [object()]
+        tools.capability_event = None
+        cfg = replace(self.cfg, tools={'enabled': True, 'max_steps': 1})
+        chat = Chat(cfg, self.store, self.budget, self.model, tools=tools)
+        self.model.side_effect = UserError('usage missing')
+        with self.assertRaises(UserError) as raised:
+            chat.send('hello')
+        self.assertEqual(type(raised.exception), UserError)
+        self.assertEqual(self.model.call_count, 1)
 
     def test_ctrl_c_during_reply_save_finishes_reply_and_cost(self):
         append = self.store.append

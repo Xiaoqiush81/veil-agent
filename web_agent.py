@@ -5,6 +5,7 @@ file only supplies its input/output/approval functions and a small HTTP server
 bound to 127.0.0.1.
 """
 import argparse
+import hashlib
 import hmac
 import json
 import queue
@@ -13,6 +14,7 @@ import sys
 import threading
 import time
 import webbrowser
+from collections import OrderedDict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -22,6 +24,7 @@ from veil_agent import (ROOT, Budget, Chat, Store, UserError, load_character,
 
 PAGE = Path(__file__).resolve().parent / 'web' / 'index.html'
 MAX_BODY = 200_000
+MAX_SUBMISSIONS = 1024
 
 
 class Hub:
@@ -36,6 +39,7 @@ class Hub:
         self.inbox = queue.Queue()
         self.answers = queue.Queue()
         self.pending = None       # event id of the approval being asked, else None
+        self.submissions = OrderedDict()  # recent request ids -> normalized text digest
 
     def push(self, kind, text):
         with self.cond:
@@ -48,13 +52,16 @@ class Hub:
         prefix = f'{self.name}: '
         if text.startswith(prefix):
             self.push('assistant', text[len(prefix):])
+        elif text.startswith('请求失败，未自动重试'):
+            self.push('error', text)
         elif text.startswith('接上了'):
             self.push('notice', text.split('。')[0] + '。')   # drop the terminal-only command hints
         else:
             self.push('notice', text)
 
     def input_fn(self, _prompt=''):
-        self.busy = False
+        with self.cond:
+            self.busy = False
         while True:
             try:
                 text = self.inbox.get(timeout=0.5)
@@ -62,8 +69,27 @@ class Hub:
                 if self.stopped:
                     raise EOFError
                 continue
-            self.busy = True
+            with self.cond:
+                self.busy = True
             return text
+
+    def submit(self, text, request_id):
+        text_digest = hashlib.sha256(text.encode('utf-8')).digest()
+        # Check busy and register the accepted request atomically for all handlers.
+        with self.cond:
+            if request_id in self.submissions:
+                return 'duplicate' if self.submissions[request_id] == text_digest else 'conflict'
+            if self.stopped:
+                return 'stopped'
+            if self.busy:
+                return 'busy'
+            self.busy = True
+            self.push('user', text)
+            self.submissions[request_id] = text_digest
+            if len(self.submissions) > MAX_SUBMISSIONS:
+                self.submissions.popitem(last=False)
+            self.inbox.put(text)
+            return 'accepted'
 
     def approval(self, prompt):
         # Same sentence the terminal shows; the page offers two buttons for y/N.
@@ -164,18 +190,20 @@ def make_handler(hub, token, port):
                 return
             if url.path == '/api/send':
                 text = body.get('text')
+                request_id = body.get('request_id')
                 if not isinstance(text, str) or not text.strip():
                     self._send(400, {'error': 'empty'})
-                elif hub.busy:
-                    self._send(409, {'error': 'busy'})
+                elif not isinstance(request_id, str) or not request_id or len(request_id) > 100:
+                    self._send(400, {'error': 'request_id'})
                 else:
                     text = text.strip()
-                    hub.busy = True
-                    hub.push('user', text)
-                    if text == '/quit':
-                        hub.push('notice', '正在保存并退出，稍等几秒，然后可以关掉这个页面。')
-                    hub.inbox.put(text)
-                    self._send(200, {'ok': True})
+                    result = hub.submit(text, request_id)
+                    if result in ('accepted', 'duplicate'):
+                        if result == 'accepted' and text == '/quit':
+                            hub.push('notice', '正在保存并退出，稍等几秒，然后可以关掉这个页面。')
+                        self._send(200, {'ok': True, 'duplicate': result == 'duplicate'})
+                    else:
+                        self._send(409, {'error': result})
             elif url.path == '/api/approve':
                 answer = body.get('answer')
                 if answer not in ('y', 'n'):

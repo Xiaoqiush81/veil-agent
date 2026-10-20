@@ -36,6 +36,10 @@ class TooLong(UserError):
     """Nothing was saved or sent; the session can carry on."""
 
 
+class RequestFailed(UserError):
+    """A provider request failed after being sent; its reservation stays pending."""
+
+
 class BudgetExceeded(UserError):
     """A request was refused before sending because of the configured limit."""
 
@@ -475,14 +479,22 @@ class Chat:
             if self.tools and self.tools.tools:
                 reply, tool_summaries = self._tool_chat(messages, request_id, len(history), len(head))
             else:
-                reply, prompt, completion, cached = self.model(messages)
+                try:
+                    reply, prompt, completion, cached = self.model(messages)
+                except UserError:
+                    raise
+                except Exception as exc:
+                    # Keep the reservation pending: the provider may have received
+                    # the request even when its response was lost.
+                    raise RequestFailed('请求失败，未自动重试；输入已保存，本次保留预留费用。') from exc
         except (KeyboardInterrupt, EOFError):
             raise
-        except TooLong:
+        except (TooLong, RequestFailed):
+            # The failed message may already be persisted (provider failure or a
+            # tool-mode length failure). Keep this live session aligned with a
+            # reopened one; recent() also fails closed on corrupt chat records.
+            self.history, self.rounds = self.recent()
             raise
-        except Exception as exc:
-            # Provider errors may contain credentials, URLs or private prompts.
-            raise UserError('请求失败，未自动重试；输入已保存，本次保留预留费用。') from exc
         with saving():
             if not isinstance(reply, str) or not reply.strip():
                 raise UserError('接口没有返回文字回复；本次保留预留费用。')
@@ -550,8 +562,12 @@ class Chat:
             try:
                 response = self.model(loop_messages, tools=offered, message_output=True,
                                       max_tokens=step_cfg.max_output_tokens, detail=True)
-            except Exception:
+            except UserError:
                 raise
+            except Exception as exc:
+                # Only the provider call is recoverable. Ledger, storage and tool
+                # integrity failures below must still stop the session.
+                raise RequestFailed('请求失败，未自动重试；输入已保存，本次保留预留费用。') from exc
             message, prompt, completion, cached, *finish = response
             if isinstance(prompt, int) and prompt > 0:
                 calibration = max(0.5, min(1.0, prompt / sent_bytes))
@@ -714,6 +730,11 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead):
         output(chat.tools.startup_notice)
     if chat.pending_capability_event:
         output(chat.pending_capability_event)
+
+    def notify_dropped():
+        if drop():
+            output('（等回复时打的字没有收到，请重新输入。）')
+
     try:
         while True:
             if chat.memory:
@@ -744,11 +765,14 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead):
                 except TooLong as exc:
                     output(str(exc))
                     continue
+                except RequestFailed as exc:
+                    output(str(exc))
+                    notify_dropped()
+                    continue
                 if chat.trim_note:
                     output(chat.trim_note)
                 output(f'{chat.cfg.name}: {reply}')
-                if drop():
-                    output('（等回复时打的字没有收到，请重新输入。）')
+                notify_dropped()
     except (KeyboardInterrupt, EOFError):
         output('\n已退出，已保存的记录仍在；未完成请求的预留额可用 /cost 查看。')
 
