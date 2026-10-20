@@ -1,4 +1,5 @@
 import json
+import re
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -77,7 +78,10 @@ class NativeMemoryTests(unittest.TestCase):
         self.assertTrue(any('hold' in line and '新建：Blue lamp' in line and '成功' in line
                             for line in self.output))
         rows = self.store.read('fake/tools.jsonl')
-        self.assertEqual((rows[0]['tool'], rows[0]['state']), ('hold', '成功'))
+        hold_event = next(row for row in rows if row.get('tool') == 'hold')
+        self.assertEqual((hold_event['tool'], hold_event['state']), ('hold', '成功'))
+        capability_events = [row for row in rows if row.get('kind') == 'capability']
+        self.assertEqual(len(capability_events), 1)
         costs = self.store.read('costs.jsonl')
         self.assertTrue(any(c.get('accounting') == 'ombre-model-estimate' for c in costs))
         self.assertTrue(any(c.get('accounting') == 'embedding-estimate' for c in costs))
@@ -202,7 +206,7 @@ class NativeMemoryTests(unittest.TestCase):
 
     def test_only_the_two_memory_tools_are_offered_and_delete_is_not_one_of_them(self):
         self.assertEqual({t['function']['name'] for t in permitted_tools(self.tools.tools)},
-                         {'hold', 'breath_search'})
+                         {'hold', 'breath_search', 'memory_history'})
         result, state, _ = self.tools.invoke('trace', {'bucket_id': 'x', 'delete': True})
         self.assertEqual(state, '被拒绝')
 
@@ -213,6 +217,172 @@ class NativeMemoryTests(unittest.TestCase):
         self.assertIn('hold', text)
         self.assertNotIn('every four completed rounds', text)
         self.assertIn('every four completed rounds', build_self_description(self.cfg, self.budget, True, None))
+
+
+class VersionedOmbreBackend(Backend):
+    def __init__(self, path):
+        super().__init__()
+        self.path = path
+        self.result = ''
+
+    def list_tools(self):
+        names = ('trace', 'dream', 'letter_write', 'letter_read', 'letter_lock_update',
+                 'anchor', 'release', 'plan', 'pulse')
+        return [SimpleNamespace(name=name, inputSchema={'type': 'object', 'properties': {}},
+                                description=f'upstream {name}') for name in names]
+
+    def call(self, name, args):
+        self.calls.append((name, args))
+        if name == 'trace':
+            raw = self.path.read_text(encoding='utf-8')
+            if args.get('content') is not None:
+                raw = re.sub(r'(?<=---\n)([\s\S]*?)(?=\n---)',
+                             lambda match: match.group(1), raw, count=0)
+                raw = raw.replace('old memory body', args['content'])
+            if args.get('tags'):
+                tags = [item.strip() for item in args['tags'].split(',') if item.strip()]
+                raw = re.sub(r'^tags:.*$', 'tags: ' + json.dumps(tags, ensure_ascii=False), raw,
+                             count=1, flags=re.M)
+            self.path.write_text(raw, encoding='utf-8')
+            return 'updated'
+        if name in ('dream', 'pulse'):
+            return self.result
+        return f'{name} result'
+
+
+class OmbreToolGuardTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.store = Store(Path(self.temp.name) / 'data')
+        self.vault = self.store.root / 'fake' / 'memory' / 'dynamic'
+        self.vault.mkdir(parents=True)
+        self.path = self.vault / 'Memory_mem001.md'
+        self.path.write_text('---\nid: mem001\ntitle: Old title\ntags: [keep]\n---\nold memory body\n',
+                             encoding='utf-8')
+        provider = {'model': 'fake', 'max_input_tokens': 20000, 'input_cny_per_million': Decimal(2),
+                    'output_cny_per_million': Decimal(8), 'cached_input_cny_per_million': Decimal(1)}
+        self.cfg = Character('fake', 'Example', 'fictional persona', 20, 1024, provider, 'fake',
+            {'model': 'fake-embedding', 'input_cny_per_million': '0.07', 'mode': 'native'},
+            {'enabled': False, 'folder': 'data/fake/workspace', 'max_steps': 4, 'max_result_bytes': 8192})
+        self.backend = VersionedOmbreBackend(self.path)
+        self.memory = Memory(self.cfg, self.store, Budget(self.store), Mock(), self.backend)
+        self.backend.calls.clear()  # Discard Memory's normal startup breath.
+        self.addCleanup(self.memory.__exit__, None, None, None)
+        self.files = SimpleNamespace(tools=[], capability_event=None, description='files ',
+            consume_capability_event=lambda: None, announce_autonomy=lambda: None,
+            invoke=lambda n, a, ap: ('denied', '被拒绝', n), preview_summary=lambda n, a: n)
+        self.tools = ToolSet(self.files, NativeMemoryTools(self.memory))
+
+    def call(self, name, args, approval=None):
+        return self.tools.invoke(name, args, approval)
+
+    def test_trace_saves_full_previous_markdown_and_history_is_read_only(self):
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'content': 'corrected memory',
+                                               'why_remembered': 'fix a mistake'})
+        self.assertEqual(state, '成功')
+        self.assertIn('old memory body', self.store.read('fake/memory-versions.jsonl')[0]['old_content'])
+        history, history_state, _ = self.call('memory_history', {'memory_id': 'mem001'})
+        self.assertEqual(history_state, '成功')
+        self.assertIn('old memory body', history)
+        self.assertEqual([name for name, _ in self.backend.calls], ['trace'])
+
+    def test_hidden_memory_cannot_be_traced_or_read_from_history(self):
+        self.memory.state['entries']['mem001'] = {'title': 'Old title', 'hidden': True}
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'content': 'changed'})
+        self.assertEqual(state, '被拒绝')
+        self.assertEqual(self.call('memory_history', {'memory_id': 'mem001'})[1], '被拒绝')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_live_delete_requires_ui_approval_and_rejection_does_not_mutate(self):
+        prompts = []
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'delete': True,
+                                               'delete_reason': 'not useful'},
+                                     lambda prompt: prompts.append(prompt) or 'n')
+        self.assertEqual(state, '被拒绝')
+        self.assertIn('not useful', prompts[0])
+        self.assertEqual(self.backend.calls, [])
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'delete': True,
+                                               'delete_reason': 'approved'}, lambda _: 'y')
+        self.assertEqual(state, '成功')
+        self.assertTrue(self.memory.state['entries']['mem001']['deleted'])
+
+    def test_autonomous_delete_is_queued_and_refusal_removes_pending_tag(self):
+        self.tools.set_autonomy(True)
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'delete': True,
+                                               'delete_reason': 'duplicate'})
+        self.assertEqual(state, '成功')
+        self.assertIn('待删除', self.memory.tags_for('mem001'))
+        self.assertEqual(self.store.read('fake/delete-requests.jsonl')[-1]['status'], 'pending')
+        self.tools.set_autonomy(False)
+        notes = self.tools.native.process_pending_deletions(lambda _: 'n')
+        self.assertTrue(notes)
+        self.assertNotIn('待删除', self.memory.tags_for('mem001'))
+        self.assertEqual(self.store.read('fake/delete-requests.jsonl')[-1]['status'], 'rejected')
+
+    def test_autonomous_delete_recognizes_manual_ombre_deletion(self):
+        self.tools.set_autonomy(True)
+        self.call('trace', {'bucket_id': 'mem001', 'delete': True, 'delete_reason': 'duplicate'})
+        self.path.write_text(self.path.read_text(encoding='utf-8').replace(
+            'tags: ["keep", "待删除"]', 'tags: ["keep", "待删除"]\ndeleted_at: 2026-10-21'),
+            encoding='utf-8')
+        prompts = []
+        self.backend.calls.clear()
+        self.tools.native.process_pending_deletions(lambda prompt: prompts.append(prompt) or 'y')
+        rows = self.store.read('fake/delete-requests.jsonl')
+        self.assertEqual(rows[-1]['status'], 'approved_external')
+        self.assertEqual(prompts, [])
+        self.assertEqual(self.backend.calls, [])
+
+    def test_autonomous_delete_stops_if_pending_tag_was_removed_in_ombre(self):
+        self.tools.set_autonomy(True)
+        self.call('trace', {'bucket_id': 'mem001', 'delete': True, 'delete_reason': 'duplicate'})
+        self.backend.call('trace', {'bucket_id': 'mem001', 'tags': 'keep'})
+        prompts = []
+        self.backend.calls.clear()
+        notes = self.tools.native.process_pending_deletions(lambda prompt: prompts.append(prompt) or 'y')
+        rows = self.store.read('fake/delete-requests.jsonl')
+        self.assertEqual(rows[-1]['status'], 'rejected')
+        self.assertEqual(prompts, [])
+        self.assertEqual(self.backend.calls, [])
+        self.assertTrue(any('标记已移除' in note for note in notes))
+
+    def test_disallowed_ombre_delete_parameters_never_reach_server(self):
+        result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'hard_delete': True})
+        self.assertEqual(state, '被拒绝')
+        self.assertEqual(self.backend.calls, [])
+
+    def test_dream_and_pulse_do_not_forward_hidden_memory_blocks(self):
+        self.memory.state['entries']['mem001'] = {'title': 'Old title', 'hidden': True}
+        self.backend.result = ('=== Dreaming · 过去 48 小时全量记忆（2 个桶）===\nID: mem001\nhidden body\n---\n'
+                              'ID: visible\nvisible body')
+        dream = self.call('dream', {})[0]
+        self.assertNotIn('hidden body', dream)
+        self.assertIn('（1 个桶）', dream)
+        self.backend.result = ('固化桶: 7 个\n=== 记忆列表 ===\n💭 [mem001] secret\n'
+                               '💭 [visible] shown')
+        pulse = self.call('pulse', {})[0]
+        self.assertNotIn('secret', pulse)
+        self.assertNotIn('固化桶: 7 个', pulse)
+
+    def test_upstream_schemas_are_selected_by_name(self):
+        names = {tool.name for tool in self.tools.native.tools}
+        self.assertTrue(set(('trace', 'dream', 'letter_write', 'letter_read', 'letter_lock_update',
+                             'anchor', 'release', 'plan', 'pulse')).issubset(names))
+        self.assertNotIn('grow', names)
+        self.assertEqual(next(t for t in self.tools.native.tools if t.name == 'trace').description,
+                         'upstream trace')
+
+    def test_ombre_embedding_calls_keep_the_existing_budget_reservation(self):
+        for name, args in (
+                ('plan', {'content': 'fictional promise'}),
+                ('letter_write', {'author': 'ai', 'content': 'fictional letter'}),
+                ('letter_read', {'query': 'fictional letter'})):
+            self.memory.call(name, args)
+        estimates = [row for row in self.store.read('costs.jsonl')
+                     if row.get('type') == 'reserve'
+                     and row.get('accounting') == 'embedding-estimate']
+        self.assertEqual(len(estimates), 3)
 
 
 if __name__ == '__main__':
@@ -344,3 +514,18 @@ class DegradedNoticeTests(unittest.TestCase):
         self.assertEqual(self.search(body), [])
         self.assertEqual(self.search(''), [])
 
+
+
+
+class PendingDeletionChatTests(unittest.TestCase):
+    def test_next_chat_message_asks_lan_and_tells_peter_the_outcome(self):
+        from veil_agent import pending_deletion_context
+        store = Store(Path(tempfile.mkdtemp()))
+        native = SimpleNamespace(process_pending_deletions=Mock(return_value=['已同意并删除记忆 #a1「旧事」。']))
+        chat = SimpleNamespace(tools=SimpleNamespace(native=native), approval=lambda _: 'y',
+                               store=store, cfg=SimpleNamespace(id='peter', name='Peter'))
+        context = pending_deletion_context(chat)
+        native.process_pending_deletions.assert_called_once_with(chat.approval)
+        self.assertIn('已同意并删除记忆 #a1', context)
+        native.process_pending_deletions.return_value = []
+        self.assertIsNone(pending_deletion_context(chat))
