@@ -191,14 +191,6 @@ class Meter:
             entry["committed_cny"] = str(self.committed)
             self.reservations.pop(reservation["request_id"], None)
             self._append(entry)
-
-
-def ledger_line_count(path):
-    path = Path(path)
-    if not path.exists():
-        return 0
-    return sum(1 for line in path.open("r", encoding="utf-8") if line.strip())
-
     def cancel(self, reservation):
         with self.lock:
             self.reservations.pop(reservation["request_id"], None)
@@ -215,6 +207,13 @@ def ledger_line_count(path):
         with self.lock:
             self._append({"action": "reject", "system": system, "provider": provider,
                           "request_body_bytes": input_bytes, "reason": reason[:120]})
+
+
+def ledger_line_count(path):
+    path = Path(path)
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.open("r", encoding="utf-8") if line.strip())
 
 
 def make_handler(meter, api_keys):
