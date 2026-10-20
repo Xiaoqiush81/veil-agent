@@ -88,11 +88,18 @@ class Meter:
                 if original["provider"] == "deepseek":
                     self.pending -= Decimal(original["reserved_cny"])
                     if row["action"] == "settle":
-                        self.committed += Decimal(row["amount_cny"])
+                        if row.get("budget_hard_stop"):
+                            self.committed = max(self.committed, TOTAL_COST_CAP)
+                        else:
+                            self.committed += Decimal(row["amount_cny"])
                     elif row["action"] == "cancel":
                         self.paid_requests -= 1
                 elif row["action"] == "cancel":
                     self.free_requests -= 1
+            elif row.get("action") == "settle" and row.get("budget_hard_stop"):
+                # Settlements can be replayed after restart even if their
+                # reservation was already removed by an earlier recovery.
+                self.committed = max(self.committed, TOTAL_COST_CAP)
 
     def reserve(self, system, provider, model, input_bytes, output_limit):
         with self.lock:
@@ -156,11 +163,13 @@ class Meter:
                     self.pending -= reservation["reserved"]
                     self.committed += actual
                     self.committed = max(self.committed, TOTAL_COST_CAP)
+                    entry["budget_hard_stop"] = True
                 entry.update({"prompt_tokens": prompt,
                               "completion_tokens": completion,
                               "cached_prompt_tokens": cached,
                               "amount_cny": str(actual),
-                              "accounting": "provider-usage"})
+                              "accounting": "provider-usage-over-reservation" if actual > reservation["reserved"]
+                              else "provider-usage"})
             else:
                 # No usage, error, or interrupted response: retain the full upper bound.
                 if reservation["provider"] == "deepseek":
@@ -182,6 +191,13 @@ class Meter:
             entry["committed_cny"] = str(self.committed)
             self.reservations.pop(reservation["request_id"], None)
             self._append(entry)
+
+
+def ledger_line_count(path):
+    path = Path(path)
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.open("r", encoding="utf-8") if line.strip())
 
     def cancel(self, reservation):
         with self.lock:

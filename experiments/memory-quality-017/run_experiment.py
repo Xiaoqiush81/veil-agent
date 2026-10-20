@@ -307,6 +307,8 @@ def ombre_context(proxy, character, transcripts=None):
 
     total_turns = 0
     if transcripts is not None:
+        if store.read(f"{character}/chat.jsonl"):
+            raise RuntimeError("Ombre isolated chat already exists; rerun with --fresh")
         turns = sorted((row for row in transcripts if row["character"] == character), key=lambda row: row["seq"])
         for row in turns:
             store.append(f"{character}/chat.jsonl", {"role": row["speaker"], "content": row["text"],
@@ -361,8 +363,12 @@ def query_ombre(runtime, question):
             "usage": {key: answer[key] for key in ("prompt_tokens", "completion_tokens", "cached_tokens")}}
 
 
-def ledger_summary(path):
-    rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+def ledger_summary(path, line_range=None):
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if line_range is not None:
+        start, end = line_range
+        lines = lines[start:end]
+    rows = [json.loads(line) for line in lines]
     reservations = {row["request_id"]: row for row in rows if row["action"] == "reserve"}
     totals = {}
     for row in rows:
@@ -423,7 +429,9 @@ def main():
             target = require_isolation(RUN / name)
             if target.is_file():
                 target.unlink()
+    from budget_proxy import ledger_line_count
     proxy = Proxy("preflight/meter.jsonl" if preflight else "meter.jsonl")
+    main_ledger_start = ledger_line_count(RUN / "meter.jsonl") if not preflight else None
     if options.preflight_serein:
         runtimes = []
         try:
@@ -488,12 +496,14 @@ def main():
                 "gold": {"facts": question["facts"], "evidence_seq": question["evidence_seq"]}})
             print(json.dumps({"phase": "question_complete", "id": question["id"],
                 **provider_snapshot(proxy.meter)}, ensure_ascii=True))
+        main_ledger_range = [main_ledger_start, ledger_line_count(RUN / "meter.jsonl")]
         result = {"fixture_version": 1, "transcripts": transcripts,
             "serein": {name: {"import": item["import"], "memories": item["memories"]}
                        for name, item in serein.items()},
             "ombre": {name: {"batches": item["batches"], "memories": item["memories"]}
                       for name, item in ombre.items()},
-            "questions": observations, "cost_by_stage": ledger_summary(RUN / "meter.jsonl"),
+            "questions": observations, "ledger_range": main_ledger_range,
+            "cost_by_stage": ledger_summary(RUN / "meter.jsonl", main_ledger_range),
             "budget": provider_snapshot(proxy.meter)}
         output_path = require_isolation(RUN / "results.json")
         output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

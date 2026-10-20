@@ -10,6 +10,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(ROOT / ".local-tmp" / "serein-017" / "src"))
 
 from run_experiment import Proxy, close_ombre, ombre_context, setup_serein
+from budget_proxy import ledger_line_count
 
 
 def strings(value):
@@ -160,14 +161,20 @@ def main():
     result_path = ROOT / ".local-tmp" / "experiment-017" / "runtime" / "results.json"
     results = json.loads(result_path.read_text(encoding="utf-8"))
     proxy = Proxy("meter.jsonl")
+    ledger_start = ledger_line_count(ROOT / ".local-tmp" / "experiment-017" / "runtime" / "meter.jsonl")
     try:
         if options.ombre_only:
             previous_path = ROOT / ".local-tmp" / "experiment-017" / "runtime" / "lifecycle.json"
             previous = json.loads(previous_path.read_text(encoding="utf-8"))
             report = {"serein": previous.get("serein"), "ombre": check_ombre(proxy, results)}
+            ranges = list(previous.get("ledger_ranges", []))
         else:
             report = {"serein": check_serein(proxy, results),
                       "ombre": check_ombre(proxy, results)}
+            ranges = []
+        ranges.append([ledger_start, ledger_line_count(
+            ROOT / ".local-tmp" / "experiment-017" / "runtime" / "meter.jsonl")])
+        report["ledger_ranges"] = ranges
         report["budget"] = {"paid_calls": proxy.meter.paid_requests,
                             "free_model_calls": proxy.meter.free_requests,
                             "committed_cny": str(proxy.meter.committed),

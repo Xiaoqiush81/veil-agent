@@ -79,6 +79,21 @@ class BudgetProxyTests(unittest.TestCase):
         self.assertEqual(Decimal(rows[-1]["amount_cny"]), Decimal("0.00182"))
         self.assertNotIn("messages", rows[-1])
 
+    def test_usage_over_reservation_hard_stops_after_restart(self):
+        meter = self.meter()
+        reservation = meter.reserve("serein", "deepseek", "deepseek-flash", 1, 1)
+        meter.settle(reservation, 200, {"prompt_tokens": 100_000,
+                                        "completion_tokens": 100_000})
+        self.assertGreaterEqual(meter.committed, TOTAL_COST_CAP)
+        row = json.loads(self.ledger.read_text(encoding="utf-8").splitlines()[-1])
+        self.assertTrue(row["budget_hard_stop"])
+        meter.close()
+
+        restarted = self.meter()
+        self.assertGreaterEqual(restarted.committed, TOTAL_COST_CAP)
+        with self.assertRaisesRegex(ValueError, "budget exhausted"):
+            restarted.reserve("serein", "deepseek", "deepseek-flash", 1, 1)
+
     def test_allowlisted_request_is_metered_and_ledger_omits_payload_and_key(self):
         seen = {}
 

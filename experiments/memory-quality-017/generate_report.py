@@ -36,32 +36,71 @@ def main():
     memories = {system: {role: data["memories"] for role, data in results[system].items()}
                 for system in ("serein", "ombre")}
 
-    rows = [json.loads(line) for line in (RUN / "meter.jsonl").read_text(encoding="utf-8").splitlines()]
+    rows = [json.loads(line) for line in (RUN / "meter.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    def rows_for_range(value):
+        if (not isinstance(value, list) or len(value) != 2
+                or not all(isinstance(item, int) for item in value)):
+            raise ValueError("run result is missing a valid ledger range")
+        start, end = value
+        if start < 0 or end < start or end > len(rows):
+            raise ValueError("ledger range is outside the current cumulative ledger")
+        return rows[start:end]
+
+    main_rows = rows_for_range(results.get("ledger_range"))
+    lifecycle_ranges = lifecycle.get("ledger_ranges")
+    if not isinstance(lifecycle_ranges, list) or not lifecycle_ranges:
+        raise ValueError("lifecycle result is missing ledger ranges")
+    lifecycle_rows = [row for item in lifecycle_ranges for row in rows_for_range(item)]
+    selected_indices = [i for start, end in [results["ledger_range"], *lifecycle_ranges]
+                        for i in range(start, end)]
+    if len(selected_indices) != len(set(selected_indices)):
+        raise ValueError("main experiment and lifecycle ledger ranges overlap")
+    experiment_rows = main_rows + lifecycle_rows
     paid = defaultdict(lambda: {"calls": 0, "input": 0, "output": 0, "cny": Decimal("0")})
     free = defaultdict(lambda: {"calls": 0, "input": 0, "output": 0})
-    for row in rows:
+    main_paid = defaultdict(lambda: {"calls": 0, "input": 0, "output": 0, "cny": Decimal("0")})
+    lifecycle_paid_calls = 0
+    lifecycle_cny = Decimal("0")
+    main_free_calls = lifecycle_free_calls = 0
+    for row in experiment_rows:
         if row["action"] == "reserve":
             if row["provider"] == "deepseek":
                 paid[row["system"]]["calls"] += 1
+                if row in main_rows:
+                    main_paid[row["system"]]["calls"] += 1
+                else:
+                    lifecycle_paid_calls += 1
             else:
                 free[row["system"]]["calls"] += 1
+                if row in main_rows:
+                    main_free_calls += 1
+                else:
+                    lifecycle_free_calls += 1
         elif row["action"] == "settle":
             destination = paid if row["provider"] == "deepseek" else free
             item = destination[row["system"]]
             item["input"] += row.get("prompt_tokens") or 0
             item["output"] += row.get("completion_tokens") or 0
             item["cny"] = item.get("cny", Decimal("0")) + Decimal(row.get("amount_cny", "0"))
+            if row["provider"] == "deepseek":
+                amount = Decimal(row.get("amount_cny", "0"))
+                if row in main_rows:
+                    main_paid[row["system"]]["input"] += row.get("prompt_tokens") or 0
+                    main_paid[row["system"]]["output"] += row.get("completion_tokens") or 0
+                    main_paid[row["system"]]["cny"] += amount
+                else:
+                    lifecycle_cny += amount
 
-    serein_paid = [value for stage, value in paid.items() if stage.startswith("serein_")]
-    ombre_paid = [value for stage, value in paid.items() if stage.startswith("ombre_")]
+    serein_main_cost = sum((value["cny"] for stage, value in main_paid.items()
+                            if stage.startswith("serein_")), Decimal("0"))
+    ombre_main_cost = sum((value["cny"] for stage, value in main_paid.items()
+                           if stage.startswith("ombre_")), Decimal("0"))
     total_paid = sum(value["calls"] for value in paid.values())
     total_cny = sum((value.get("cny", Decimal("0")) for value in paid.values()), Decimal("0"))
     total_in = sum(value["input"] for value in paid.values())
     total_out = sum(value["output"] for value in paid.values())
-    lifecycle_paid_calls = total_paid - 41
-    lifecycle_cny = total_cny - Decimal(results["budget"]["committed_cny"])
     free_calls = sum(value["calls"] for value in free.values())
-    rejected = [row for row in rows if row["action"] == "reject"]
+    rejected = [row for row in experiment_rows if row["action"] == "reject"]
 
     peter_event = next((item for item in memories["serein"]["peter"] if item["kind"] == "event"), None)
     ghost_event = next((item for item in memories["serein"]["ghost"] if item["kind"] == "event"), None)
@@ -146,7 +185,7 @@ def main():
         "",
         "## 模型费用与调用",
         "",
-        "所有付费请求都先经过本机 loopback 预算代理；DeepSeek 高峰价按输入 ¥2/百万 token、输出 ¥8/百万 token，BGE-M3 与 BGE reranker 按 SiliconFlow 当前官方目录标价免费。账本不含聊天正文、响应正文或密钥。以下全量合计包含生命周期 canary 的 2 次附加付费请求；盲测主实验为前 41 次/¥0.3911。",
+        "所有付费请求都先经过本机 loopback 预算代理；DeepSeek 高峰价按输入 ¥2/百万 token、输出 ¥8/百万 token，BGE-M3 与 BGE reranker 按 SiliconFlow 当前官方目录标价免费。账本不含聊天正文、响应正文或密钥。费用仅统计本次主实验与生命周期检查的账本区间，不会把累计账本中以前运行的费用算入本报告。",
         "",
         "| 系统/阶段 | 调用 | 输入 token | 输出 token | 实际费用（CNY） |",
         "|---|---:|---:|---:|---:|",
@@ -157,9 +196,9 @@ def main():
     lines += [
         f"| **合计** | **{total_paid}** | **{total_in}** | **{total_out}** | **{total_cny:.8f}** |",
         "",
-        f"主盲测 Serein：25 次、¥{sum(x['cny'] for stage,x in paid.items() if stage.startswith('serein_')):.8f}；Ombre：16 次、¥{sum(x['cny'] for stage,x in paid.items() if stage.startswith('ombre_'))-lifecycle_cny:.8f}。生命周期 canary 另加 {lifecycle_paid_calls} 次付费调用，¥{lifecycle_cny:.8f}。最终费用约 **¥{total_cny:.4f}**，低于代理硬上限 ¥9.99 和用户批准的 ¥10。",
+        f"主盲测 Serein：{sum(value['calls'] for stage,value in main_paid.items() if stage.startswith('serein_'))} 次、¥{serein_main_cost:.8f}；Ombre：{sum(value['calls'] for stage,value in main_paid.items() if stage.startswith('ombre_'))} 次、¥{ombre_main_cost:.8f}。生命周期检查另加 {lifecycle_paid_calls} 次付费调用，¥{lifecycle_cny:.8f}。最终费用约 **¥{total_cny:.4f}**，低于代理硬上限 ¥9.99 和用户批准的 ¥10。",
         "",
-        f"免费模型共 **{free_calls} 次**（BGE embedding/rerank；主盲测 814 次，生命周期验证另用 247 次），账单 ¥0。Serein 的自动索引阶段单独使用 803 次 embedding 和 11 次 rerank。",
+        f"免费模型共 **{free_calls} 次**（BGE embedding/rerank；主盲测 {main_free_calls} 次，生命周期验证另用 {lifecycle_free_calls} 次），账单 ¥0。",
         "",
         "Serein 首次 Track Router 的约 19.5 KB 请求和 Event Curator 的约 45.6 KB 请求先被代理拒绝，未产生费用；随后 2,000/4,000 token 输出预算让 Track Router JSON 截断并重试，重试花费已计入总账。最终代理配置为输入 60 KB、输出 8,000 token，按未缓存高峰价每次最多预留 ¥0.194，整场最多 ¥9.99，最多 120 次付费请求，免费模型最多 1,200 次。累计未超过上限。",
         "",
