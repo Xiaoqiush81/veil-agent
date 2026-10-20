@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent
 ENDPOINT = ROOT / 'data' / 'web_service.json'
 STARTUP_ERROR = ROOT / 'data' / 'web_service_error.txt'
 FAILED = 'Peter 网页服务没有启动。请检查安装状态后重新双击 start-web.bat。'
-STARTUP_WAIT = 25
+STARTUP_WAIT = 90   # tools and memory start before the chat is ready
 
 
 def report_error(message):
@@ -38,7 +38,7 @@ class StartupMutex:
             kernel.ReleaseMutex.argtypes = (wintypes.HANDLE,)
             kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
             self.handle = kernel.CreateMutexW(None, False, 'Local\\VEILAgentWebStartup')
-            result = kernel.WaitForSingleObject(self.handle, 30000)
+            result = kernel.WaitForSingleObject(self.handle, (STARTUP_WAIT + 10) * 1000)
             if result not in (0, 0x80):
                 raise RuntimeError('启动协调超时')
         return self
@@ -50,7 +50,7 @@ class StartupMutex:
             kernel.CloseHandle(self.handle)
 
 
-def read_endpoint():
+def read_endpoint(require_ready=False):
     try:
         value = json.loads(ENDPOINT.read_text(encoding='utf-8'))
         port, token = value.get('port'), value.get('token')
@@ -61,6 +61,8 @@ def read_endpoint():
         with urlopen(request, timeout=1) as response:
             state = json.loads(response.read())
         if state.get('stopped') is not False:
+            return None
+        if require_ready and state.get('ready') is not True:
             return None
         return f'http://127.0.0.1:{port}/?t={token}'
     except (OSError, ValueError, URLError, AttributeError, TypeError):
@@ -94,15 +96,17 @@ def main():
         parser.add_argument('--no-browser', action='store_true')
         args = parser.parse_args()
         with StartupMutex():
-            url = read_endpoint()
+            url = read_endpoint(require_ready=True)
             if url is None:
-                STARTUP_ERROR.unlink(missing_ok=True)
-                process = start_service(args.character, args.port)
+                process = None
+                if read_endpoint() is None:   # nothing running; a starting service is waited for
+                    STARTUP_ERROR.unlink(missing_ok=True)
+                    process = start_service(args.character, args.port)
                 deadline = time.monotonic() + STARTUP_WAIT
                 while time.monotonic() < deadline:
                     time.sleep(0.2)
-                    url = read_endpoint()
-                    if url or process.poll() is not None:
+                    url = read_endpoint(require_ready=True)
+                    if url or (process is not None and process.poll() is not None):
                         break
                 if not url:
                     report_error(startup_error())
