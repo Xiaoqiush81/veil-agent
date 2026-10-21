@@ -9,6 +9,8 @@
 - 2026-10-21 Codex：工单 043 从 main `a48f13dec08d89ea2d1667ff550ae2e4cbe6baca` 建立分支 `ticket/043-long-task-side-effect-verification`，PR #80。修复 031-06：稳定操作 ID、规范目标、文件内容效果摘要与真实读回；非文件操作及旧非文件 checkpoint 需精确目标的成功只读回读，旧操作 ID 稳定派生。CodeRabbit 指出的非文件 pending 卡死已修复并回帖；当前代码 head `92323e82906633457b967101f50c7ca16f7dbed4` 的 Ubuntu/Windows × Python 3.11/3.12 CI 全绿。Claude 评论请求尚无回复，GitHub reviewer API 不允许请求 `claude`（非协作者）；未把其他审查冒充 Claude。下一步是获得 Claude 独立审查、确认最终文档 head CI 后再合并。Lan 的 A–E Windows 体验仍待验收；040 行为保留，044 不在范围。
 # 交接
 
+- 2026-10-22 Codex：工单 052 基于 main `04fd7d8`，分支 `ticket/052-last-autonomy-context`。051 的 PR #88 已合入。052 仅复用界面详情事实源 `data/<角色>/autonomy.jsonl`：普通聊天和下一次自主唤醒持续收到最新已结束活动，新增英文标签 `System record | Last autonomous activity | Occurred at:` 明确它是历史事实；042 的首次交接确认日志不再阻断后续上下文。虚构记录回归及完整 unittest 已通过（313 项，2 项跳过）；尚待提交、推送、开 PR 与 CI。下一窗口先检查 PR 的 CI；不要读取私人数据或发起付费请求。
+
 - 2026-10-22 Codex：开始工单 051，隔离工作区/分支 `ticket/051-docs-actual-functionality` 基于最新 main `7a882af`。已核实 GitHub：PR #84（047 桌面壳）、#86（050 固定依赖）和 #87（048 实验 HTTP）均已合入；#86 的四平台全套测试及依赖安全扫描通过，#87 的四平台全套测试通过。当前修订 README 的能力/限制与 `/cost` 说明，并改正 STATUS 内“已合入”与“未合并/待 CI”并存的过期记录；不改生产逻辑。完整 `python -m unittest discover -s tests` 已按要求尝试两次，但此隔离工作区没有 `.venv\\Scripts\\python.exe`，无法本地启动；没有将此写成通过。下一步：复核文档 diff，提交、推送并开 PR，由 GitHub CI 运行完整套件后交 Lan 安排 Claude 审查；Codex 不申请 Claude、不合并。
 
 - 047 最后核对：代码提交 `516d1eb50758418d5012387c5e1da1fd38719494` 的两次 Windows desktop 及两次 Tests（push/PR）均成功，Tests 覆盖 Windows/Linux × Python 3.11/3.12。已在 PR #84 请求 CodeRabbit full review，尚无正式审查结果，所以未合并。本地最终运行包源码与该代码提交内容一致，PNG 原哈希一致；ZIP 约 155 MB，不进仓库。下一步先看正式审查回复和最新文档 head CI，必要问题处理后才能合并；Lan 真实体验未验收。

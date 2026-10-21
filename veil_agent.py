@@ -802,9 +802,11 @@ class Chat:
             self.pending_capability_event_model = capability_model_notice(self.tools)
         recalled = self.memory.context(text) if self.memory else []
         autonomy_handoff_id = None
-        if not autonomy and extra_context is None:
-            from autonomy import recent_chat_handoff
-            autonomy_handoff_id, extra_context = recent_chat_handoff(self.store, self.cfg)
+        if not autonomy:
+            from autonomy import recent_activity_context, recent_chat_handoff
+            autonomy_handoff_id, _ = recent_chat_handoff(self.store, self.cfg)
+            if extra_context is None:
+                _, extra_context = recent_activity_context(self.store, self.cfg)
         stable, changing = self_facts(self.cfg, self.budget, memory_mode(self.memory), self.tools)
         description = stable + '\n' + changing
         # Order matters for the provider's prefix cache: everything that stays the same between requests
