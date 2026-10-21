@@ -275,11 +275,10 @@ class LongTaskStore:
             if task['pending_action'] and status == 'completed' and not resolve:
                 return '程序拒绝：尚有结果未核实的操作，不能标记任务完成。', '被拒绝', task['title']
             if progress:
-                if status == 'completed':
-                    task['completion_evidence'] = progress.strip()
                 if len(task['progress']) >= MAX_PROGRESS_ITEMS:
                     if status != 'completed':
                         return '进度证据已达保存上限；请先用 progress_update 总结已有证据后再继续。', '被拒绝', task['title']
+                    task['completion_evidence'] = progress.strip()
                 else:
                     task['progress'].append({'time': now(), 'text': progress.strip()})
             if resolve:
