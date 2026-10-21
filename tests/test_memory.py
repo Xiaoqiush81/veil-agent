@@ -122,7 +122,7 @@ class MemoryTests(unittest.TestCase):
         self.memory.supplement()
         raw = json.loads(self.model.call_args.args[0][1]['content'])['batches'][0]
         self.assertEqual(raw['tool_events'], ['你的能力有变化：可读 workspace。', 'read_text_file：notes.txt（成功）'])
-        self.assertIn('回复正文未提供给补记', raw['turns'][0][1]['content'])
+        self.assertIn('reply text is omitted from memory extraction', raw['turns'][0][1]['content'])
         self.assertNotEqual(raw['turns'][0][1]['content'], 'file body secret')
         self.assertNotIn('file body', json.dumps(raw, ensure_ascii=False))
         self.assertTrue(self.backend.rows)
@@ -143,7 +143,7 @@ class MemoryTests(unittest.TestCase):
         self.memory.supplement()
         raw = json.loads(self.model.call_args.args[0][1]['content'])['batches'][0]
         self.assertEqual(raw['turns'][0][1]['content'], 'reply 0')
-        self.assertIn('回复正文未提供给补记', raw['turns'][2][1]['content'])
+        self.assertIn('reply text is omitted from memory extraction', raw['turns'][2][1]['content'])
         self.assertNotIn('file body secret', json.dumps(raw, ensure_ascii=False))
         self.assertTrue(all('file body secret' not in row.get('source_content', '')
                             for row in self.backend.rows.values()))
@@ -381,8 +381,9 @@ class MemoryTests(unittest.TestCase):
 
     def test_top_three_provenance_and_nohit(self):
         empty = self.memory.context('something new')
-        self.assertIn('不要假装记得', empty[-1]['content'])
-        self.assertIn('不是 lan 刚说的', empty[-1]['content'])
+        self.assertIn('do not claim to remember', empty[-1]['content'])
+        self.assertIn('not newly said by the user', empty[-1]['content'])
+        self.assertNotRegex('\n'.join(item['content'] for item in empty), r'[\u3400-\u9fff]')
         for i in range(5):
             self.backend.rows[str(i)] = {'content': f'body {i}'}
         text = self.memory.context('plan')[-1]['content']
@@ -539,7 +540,7 @@ class MemoryTests(unittest.TestCase):
         self.memory.jobs.join()
         sent = model.call_args.args[0]
         self.assertIn('Long-term memory:', sent[1]['content'])
-        self.assertIn('不是 lan 刚说的', sent[3]['content'])
+        self.assertIn('not newly said by the user', sent[3]['content'])
         self.assertEqual([r['role'] for r in self.store.read('fake/chat.jsonl')], ['user', 'assistant'])
 
     def test_concurrent_reservations_share_one_atomic_limit(self):

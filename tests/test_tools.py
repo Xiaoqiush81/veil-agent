@@ -244,6 +244,8 @@ class ToolPolicyTests(unittest.TestCase):
         self.assertEqual(manifest['tools'], {'read_text_file': 'allow', 'write_file': 'ask'})
         self.assertNotIn(str(self.root), json.dumps(manifest))
         self.assertIn('你的能力有变化', manager.capability_event)
+        self.assertNotRegex(manager.capability_event_model, r'[\u3400-\u9fff]')
+        self.assertIn('ask lan first', FilesystemTools._description(manager, ['write_file']))
         manager.consume_capability_event()
         reopened = FilesystemTools.__new__(FilesystemTools)
         reopened.cfg, reopened.store = manager.cfg, store
@@ -284,6 +286,7 @@ class ToolPolicyTests(unittest.TestCase):
         self.assertIn('send_message', manager.capability_event)
         self.assertIn('最多三条', manager.capability_event)
         self.assertIn('也可以不发', manager.capability_event)
+        self.assertNotRegex(manager.capability_event_model, r'[\u3400-\u9fff]')
         manager.consume_capability_event()
         reopened = FilesystemTools.__new__(FilesystemTools)
         reopened.cfg, reopened.store, reopened.folder_name = manager.cfg, store, 'workspace'
@@ -303,6 +306,7 @@ class ToolPolicyTests(unittest.TestCase):
         manager.consume_capability_event()
         manager.announce_long_tasks()
         self.assertIn('新增长期任务能力', manager.capability_event)
+        self.assertNotRegex(manager.capability_event_model, r'[\u3400-\u9fff]')
         manager.consume_capability_event()
 
         reopened = FilesystemTools.__new__(FilesystemTools)
@@ -464,7 +468,7 @@ max_result_bytes = 200
         chat = Chat(self.cfg, self.store, self.budget, model, tools=tools, output=output.append)
         self.assertEqual(chat.send('read it'), 'I could not read it.')
         tools.invoke.assert_not_called()
-        self.assertIn('参数不是合法 JSON', model.call_args_list[1].args[0][-1]['content'])
+        self.assertIn('arguments are not a valid JSON object', model.call_args_list[1].args[0][-1]['content'])
         self.assertTrue(any('参数不是合法 JSON' in line for line in output))
 
     def test_tool_output_limit_is_reserved_sent_and_settled_without_raising_daily_cap(self):
@@ -709,7 +713,7 @@ max_result_bytes = 200
         chat = Chat(self.cfg, self.store, self.budget, model, tools=tools, output=lambda _: None)
         self.assertEqual(chat.send('read it'), 'The result was too long.')
         forwarded = model.call_args_list[1].args[0][-1]['content']
-        self.assertIn('超过本轮请求长度上限', forwarded)
+        self.assertIn('exceeded this request input limit', forwarded)
         self.assertNotIn('secret', forwarded)
         self.assertTrue(any((m.get('content') or '').startswith('old ') for m in model.call_args_list[1].args[0]))
 

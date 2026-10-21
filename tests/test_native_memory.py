@@ -248,8 +248,8 @@ class NativeMemoryTests(unittest.TestCase):
         self.backend.call = persist_fake_trace
         text, state, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
         self.assertIn('lamp memory', text)
-        self.assertIn(f'记忆编号: {key}', text)
-        self.assertIn('标题: a', text)
+        self.assertIn(f'Memory ID: {key}', text)
+        self.assertIn('Title: a', text)
         self.tools.invoke('hold', {'target_id': key, 'content': 'It was a gift from her sister.'})
         self.assertEqual(len(self.backend.rows), 1)
         self.assertIn('lamp memory', self.backend.rows[key]['content'])
@@ -257,7 +257,7 @@ class NativeMemoryTests(unittest.TestCase):
         self.memory.command(f'/forget {key}')
         self.memory.command(f'/forget {key} 确认')
         text, _, _ = self.tools.invoke('breath_search', {'query': 'lamp'})
-        self.assertEqual(text, '没有找到相关记忆。')
+        self.assertEqual(text, 'No relevant memories were found.')
         self.tools.invoke('hold', {'title': 'b', 'content': 'long ' * 200})
         text, _, _ = self.tools.invoke('breath_search', {'query': 'long'})
         self.assertIn('[已截断]', text)
@@ -480,7 +480,7 @@ class OmbreToolGuardTests(unittest.TestCase):
         self.assertEqual(rows[-1]['status'], 'rejected')
         self.assertEqual(prompts, [])
         self.assertEqual(self.backend.calls, [])
-        self.assertTrue(any('标记已移除' in note for note in notes))
+        self.assertTrue(any('pending deletion marker' in note for note in notes))
 
     def test_disallowed_ombre_delete_parameters_never_reach_server(self):
         result, state, _ = self.call('trace', {'bucket_id': 'mem001', 'hard_delete': True})
@@ -553,7 +553,7 @@ class OmbreToolGuardTests(unittest.TestCase):
                                                'why_remembered': 'the event matters'})
 
         self.assertEqual(state, '成功')
-        self.assertIn('完整版本（含元数据）已留档', result)
+        self.assertIn('改动前完整版本（含元数据）已留档', result)
         versions = self.store.read('fake/memory-versions.jsonl')
         self.assertEqual(len(versions), 1)
         self.assertEqual(versions[0]['old_content'], original)
@@ -563,8 +563,8 @@ class OmbreToolGuardTests(unittest.TestCase):
         history, history_state, _ = self.call('memory_history', {'memory_id': 'mem001'})
         self.assertEqual(history_state, '成功')
         self.assertIn('old meaning metadata', history)
-        self.assertIn('本次操作原因：hold(target_id) 追加', history)
-        self.assertIn('记忆缘由（why_remembered）：the event matters', history)
+        self.assertIn('Reason for this operation: hold(target_id) 追加', history)
+        self.assertIn('Why this memory matters (why_remembered): the event matters', history)
 
     def test_hold_target_does_not_append_when_snapshot_cannot_be_saved(self):
         original = self.path.read_text(encoding='utf-8')
@@ -593,8 +593,8 @@ class OmbreToolGuardTests(unittest.TestCase):
             'why_remembered': 'why this memory matters', 'edit_reason': 'corrected the interpretation'})
 
         self.assertEqual(state, '成功')
-        self.assertIn('本次操作原因：corrected the interpretation', result)
-        self.assertIn('正文 content 与含义元数据', result)
+        self.assertIn('Reason for this operation: corrected the interpretation', result)
+        self.assertIn('content field and meaning_append/meaning_replace metadata are separate fields', result)
         sent = next(args for name, args in self.backend.calls if name == 'trace')
         self.assertNotIn('edit_reason', sent)
         self.assertEqual(sent['meaning_append'], 'new meaning')
@@ -603,8 +603,8 @@ class OmbreToolGuardTests(unittest.TestCase):
         self.assertEqual(version['why_remembered'], 'why this memory matters')
         self.assertIn('meaning: old meaning metadata', version['old_content'])
         history = self.call('memory_history', {'memory_id': 'mem001'})[0]
-        self.assertIn('本次操作原因：corrected the interpretation', history)
-        self.assertIn('记忆缘由（why_remembered）：why this memory matters', history)
+        self.assertIn('Reason for this operation: corrected the interpretation', history)
+        self.assertIn('Why this memory matters (why_remembered): why this memory matters', history)
 
     def test_ombre_embedding_calls_keep_the_existing_budget_reservation(self):
         for name, args in (
@@ -754,11 +754,13 @@ class PendingDeletionChatTests(unittest.TestCase):
     def test_next_chat_message_asks_lan_and_tells_peter_the_outcome(self):
         from veil_agent import pending_deletion_context
         store = Store(Path(tempfile.mkdtemp()))
-        native = SimpleNamespace(process_pending_deletions=Mock(return_value=['已同意并删除记忆 #a1「旧事」。']))
+        native = SimpleNamespace(process_pending_deletions=Mock(return_value=[
+            'The deletion request for memory a1 was approved and executed.']))
         chat = SimpleNamespace(tools=SimpleNamespace(native=native), approval=lambda _: 'y',
                                store=store, cfg=SimpleNamespace(id='peter', name='Peter'))
         context = pending_deletion_context(chat)
         native.process_pending_deletions.assert_called_once_with(chat.approval)
-        self.assertIn('已同意并删除记忆 #a1', context)
+        self.assertIn('The user has processed deletion requests', context)
+        self.assertNotRegex(context, r'[\u3400-\u9fff]')
         native.process_pending_deletions.return_value = []
         self.assertIsNone(pending_deletion_context(chat))
