@@ -264,6 +264,8 @@ class LongTaskStore:
             task = self._read_file()
             if not task or task['task_id'] != args['task_id']:
                 return '程序拒绝：当前任务不存在或 ID 不匹配。', '被拒绝', '长期任务'
+            if task['status'] == 'completed' and status == 'completed' and progress:
+                return '程序拒绝：任务已完成，不能覆盖已保存的完成证据。', '被拒绝', task['title']
             if resolve and (task['pending_action'] is None or not progress):
                 return '程序拒绝：没有可核实的待处理操作，或缺少核实证据。', '被拒绝', task['title']
             if resolve and (task['pending_action'].get('verified_in_step') is None
