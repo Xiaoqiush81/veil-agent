@@ -9,6 +9,12 @@
 - 2026-10-21 Codex：工单 043 从 main `a48f13dec08d89ea2d1667ff550ae2e4cbe6baca` 建立分支 `ticket/043-long-task-side-effect-verification`，PR #80。修复 031-06：稳定操作 ID、规范目标、文件内容效果摘要与真实读回；非文件操作及旧非文件 checkpoint 需精确目标的成功只读回读，旧操作 ID 稳定派生。CodeRabbit 指出的非文件 pending 卡死已修复并回帖；当前代码 head `92323e82906633457b967101f50c7ca16f7dbed4` 的 Ubuntu/Windows × Python 3.11/3.12 CI 全绿。Claude 评论请求尚无回复，GitHub reviewer API 不允许请求 `claude`（非协作者）；未把其他审查冒充 Claude。下一步是获得 Claude 独立审查、确认最终文档 head CI 后再合并。Lan 的 A–E Windows 体验仍待验收；040 行为保留，044 不在范围。
 # 交接
 
+- 047 最后核对：代码提交 `516d1eb50758418d5012387c5e1da1fd38719494` 的两次 Windows desktop 及两次 Tests（push/PR）均成功，Tests 覆盖 Windows/Linux × Python 3.11/3.12。已在 PR #84 请求 CodeRabbit full review，尚无正式审查结果，所以未合并。本地最终运行包源码与该代码提交内容一致，PNG 原哈希一致；ZIP 约 155 MB，不进仓库。下一步先看正式审查回复和最新文档 head CI，必要问题处理后才能合并；Lan 真实体验未验收。
+
+- 047 交付位置：PR #84（https://github.com/yecays-ai/veil-agent/pull/84）。原图 Windows x64 桌面壳本地打包成功；最后复查调整聊天标题和语音提示换行，自动检查增加输入框宽度断言并通过。最新 CI 与正式审查结果以 PR 为准；没有宣称 Lan 真实体验通过。
+
+- 2026-10-21 Codex：本窗口为工单 047 Windows 桌面版 0.1，基准 main `29f2379ae7aace048001991d75628deb2e038fda`，分支 `ticket/047-windows-desktop`。本地镜像是旧版且无 Git，Git HTTPS 克隆不可用；经 GitHub 接口读取固定 SHA 的源文件、用 Git 数据接口提交，不能把镜像当最新仓库。045/046 已被其他窗口占用，本单使用 047。实现集中在 desktop/ 和两个根目录启动脚本、Windows 构建 CI，不改原网页或 Python 核心。形象为用户原 PNG，已核对透明通道和 SHA256；不生成替代图。真实 Windows Electron 自动检查使用虚构 HTTP 数据，不启动私人 Agent、不调付费模型；这不能替代 Lan 体验。EXE 完整目录已本地生成，需保留配套运行库并选择已有 Agent 安装；Python Agent 没有捆绑。Memory / Ombre、Lab 桌面入口未接通，语音输入禁用；退出壳保留服务。下一步核对 047 PR 的最终 head、CI 与正式审查，仅修必要功能/安全问题；通过后交付/按规则合并，Lan 按 STATUS 三步验收。不要访问 E 盘私人 Agent 数据。
+
 - 2026-10-21 Claude：049 修复 `memory_agent.py` 前置信息解析把嵌套 YAML 键（relation_links 的 `type`）当顶层键，导致有关联的记忆被判为可见性未知并每轮提示；回归测试已加。
 - 2026-10-21 Codex：工单 045 的 PR #83 分支 `ticket/045-ombre-budget` 已补齐 `OMBRE_MODEL_ATTEMPTS`、`OMBRE_ANALYZE_OUTPUT_TOKENS`、`OMBRE_JUDGE_OUTPUT_TOKENS`。embedding 与 Ombre `hold` 模型费用先按预留上限占用共享账本，确认成功后按原单次正常估算结算并释放差额，失败或重启后无法确认时按预留上限结算。最新 head `31c42e9ee42fa2ee3b3611d8fc1f908cc0052fb7` 的 GitHub Actions run 740 已在 Windows/Linux × Python 3.11/3.12 全部通过（293 项测试，4 项跳过）；修正了一个旧 Extract 测试未筛选显式 `memory-extraction` accounting 的断言。代码未覆盖 Ombre hold 后异步计划判断及 Dashboard/HTTP 维护入口的逐请求共享硬闸门。未用真实数据或付费接口。PR 未合并；CodeRabbit 无审查提交，Claude 独立审查未完成。Lan 指示无 CodeRabbit 意见时停止，所以下一窗口先等待 Lan 指示；Windows 体验验收另行进行。
 - 2026-10-21 Codex：工单 044 的 PR #81 `ticket/044-memory-diagnostics-tool-errors` 已合入 main `29f2379ae7aace048001991d75628deb2e038fda`。合入代码将 `long_tasks.py`、`memory_native.py`、`tools_agent.py`、`veil_agent.py`、`memory_agent.py` 的工具失败原因改为英文；失败结果由 `model_tool_result()` 原样传递；回归扫描失败结果文本及安全诊断，页面和 Peter 收到相同文本。Actions run 692 的 Windows/Linux × Python 3.11/3.12 全绿。PR 记录 Claude 独立审查待 Lan 安排；Lan 的 Windows 虚构记忆聊天验收待进行。
@@ -32,3 +38,4 @@
 - 2026-10-21 Claude：工单 036 Peter 身份分层。身份与行动方式都在本机 persona/peter.md（v3 在项目共享文件夹 peter-companion/peter-identity-v3.md，不进公开仓库）；权限仍由程序给出，成长经历留给 Ombre。代码只改了程序事实里的 “terminal text chat”。Ombre 工具定义的 token 占用未测（本机装不上 Ombre）。Windows 体验待 Lan 验收。
 - 2026-10-21 Claude：去掉「新对话」写死的英文提示，按钮改发 /new；/new-en 仍可输入但等同 /new。
 - 工单 034（PR #66）、035（PR #70）已合并；Windows 体验待 Lan 验收。
+
