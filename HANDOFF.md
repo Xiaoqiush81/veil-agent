@@ -1,3 +1,4 @@
+- 2026-10-21 Codex：工单 043 从 main `a48f13dec08d89ea2d1667ff550ae2e4cbe6baca` 建立分支 `ticket/043-long-task-side-effect-verification`，PR #80。修复 031-06：稳定操作 ID、规范目标、文件内容效果摘要与真实读回；非文件操作及旧非文件 checkpoint 需精确目标的成功只读回读，旧操作 ID 稳定派生。CodeRabbit 指出的非文件 pending 卡死已修复并回帖；当前代码 head `92323e82906633457b967101f50c7ca16f7dbed4` 的 Ubuntu/Windows × Python 3.11/3.12 CI 全绿。Claude 评论请求尚无回复，GitHub reviewer API 不允许请求 `claude`（非协作者）；未把其他审查冒充 Claude。下一步是获得 Claude 独立审查、确认最终文档 head CI 后再合并。Lan 的 A–E Windows 体验仍待验收；040 行为保留，044 不在范围。
 # 交接
 
 - 2026-10-21 Claude：PR #77（042）与 PR #79（041）因小兔子限流由 Claude 审查，CI 全绿后合并；两单 Windows 体验待 Lan 验收。
