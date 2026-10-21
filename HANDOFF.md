@@ -1,6 +1,10 @@
 # 交接
 
+- 2026-10-21 Claude：PR #77（042）与 PR #79（041）因小兔子限流由 Claude 审查，CI 全绿后合并；两单 Windows 体验待 Lan 验收。
 - 2026-10-21 11:48 UTC Codex：工单 042 基于最新 main `14cbe535039d80cc865f605420d2ec42dd58e48d`，分支 `ticket/042-autonomy-handoff-once`，PR #77 开放。保留 040 最新合并记录；本次 main 仅增加 040 的长期任务实现与文档，和 042 的代码文件无重叠。042 的代码测试曾在 Windows/Linux × Python 3.11/3.12 CI 全部通过；本地 Python 与 GitHub HTTPS 克隆不可用，未建立本地 Git worktree。CodeRabbit 三次手动审查触发均被免费额度限流，正式审查未完成，不合并。下一个窗口先查看 PR #77 当前 CI 与 CodeRabbit 评论；额度恢复后触发正式审查，处理必要功能/安全意见；满足门槛后合并。之后 Lan 用专用虚构测试角色验收 042；不要以 CI 替代聊天体验。
+- 工单 041 已基于最新 main `14cbe535039d80cc865f605420d2ec42dd58e48d`（含 PR #78/040）同步到独立分支 `ticket/041-web-exit-state`，PR #79。退出状态修复完成；本地隔离 6 项定向验证通过；原生产代码提交 `a9119bf` 以及同步提交 `af81952` 的 GitHub CI Windows/Linux × Python 3.11/3.12 四项全部通过。
+- CodeRabbit 正式审查因免费配额限制未执行；恢复后再触发。按仓库规则审查完成前不合并；下一步完成审查、必要修复和合并，然后请 Lan 按 STATUS 验收 041。040 的合并状态与验收继续按 STATUS 记录。
+
 - 2026-10-21 Codex：工单 040 的 PR #78 已完成代码修改、回归与评审。最新 main 基线 8d71b06d52efaa65ee1dc4a535bc62fc5fef632a；独立分支 ticket/040-long-task-progress。完成路径保留 40 条原进度，在容量已满时单独持久化最终证据；兼容旧快照；重复完成更新被拒绝以保留首次证据。假数据回归检查实际 JSON、重启、状态展示、后续新任务及 os.replace 失败保护。GitHub Actions 最新 Windows/Linux × Python 3.11/3.12 全绿；CodeRabbit 正式评审中的唯一功能意见已修复、确认并解决。因本地项目没有安全切换分支的 Git 工作区，未在旧 checkout 运行测试；以 PR CI 为验证依据。下一步 Lan 按 STATUS 验收；无真实任务数据或付费模型参与。
 - 2026-10-21 10:22 UTC Codex：工单 039 从 main fb6211e 开始，分支 ticket/039-hidden-memory-context，只修 031-03。旧版虚构数据已复现隐藏后开场正文仍进入最终模型上下文。仅在 memory_agent.py 增加原生生命周期重新校验和失败保守过滤，memory_native.py 成功修改后同步有效可见性；未改审批、预算、调度或上游。直接记忆回归 90 项全部通过，含假模型真实请求断言；原始虚构聊天字节未变。PR #76 代码提交 a75a5e5 的完整 Windows/Linux × Python 3.11/3.12 CI 全部通过，正式小兔子 full review 完成、无须处理的意见。收尾仅更新状态文档，生产代码与回归未变；最终检查及合并状态以 PR #76 为准。未跑付费模型、未访问私人数据。下一步 Lan 按 STATUS 验收；Windows 体验未验收。本单停止，不自行领取下一单。
 - 工单 038：PR #75 已合并为 main fb6211e，此前暂停/等待审查记录已不适用。能力状态事务代码保留；Windows 体验待 Lan 验收。
