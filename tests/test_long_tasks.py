@@ -226,7 +226,8 @@ max_result_bytes = 4096
             'progress_update': 'All three verified sections are in the lab.'})
         self.assertEqual(state, '成功')
         saved = self.tasks.read()
-        self.assertEqual(saved['completion_evidence'], 'All three verified sections are in the lab.')
+        self.assertEqual(saved['completion_evidence'], '')
+        self.assertEqual(saved['progress'][-1]['text'], 'All three verified sections are in the lab.')
         self.assertEqual(self.tasks.before_tool('append_file', 'lab/new-note.md', autonomy=True),
                          (None, False))
 
