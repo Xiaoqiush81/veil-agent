@@ -195,6 +195,12 @@ max_result_bytes = 4096
         status = json.loads(reopened.status_text())
         self.assertEqual(status['completion_evidence'], final_evidence)
         _, state, _ = reopened.invoke('long_task_update', {
+            'action': 'update', 'task_id': task_id, 'status': 'completed',
+            'progress_update': 'Replacement evidence must not overwrite the first result.'})
+        self.assertEqual(state, '被拒绝')
+        self.assertEqual(reopened.read(), stored)
+
+        _, state, _ = reopened.invoke('long_task_update', {
             'action': 'create', 'title': 'Next fictional task', 'goal': 'Verify a separate result.'})
         self.assertEqual(state, '成功')
         self.assertEqual(reopened.read()['title'], 'Next fictional task')
