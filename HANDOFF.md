@@ -1,6 +1,6 @@
 # 交接
 
-- 2026-10-21 Codex：工单 040 基于最新 main 8d71b06d52efaa65ee1dc4a535bc62fc5fef632a，在独立分支 ticket/040-long-task-progress 开 PR #78。保留 40 条历史；上限时最终证据写入独立字段；旧快照兼容；回归覆盖真实 JSON、重开、下一任务、保存失败。首轮 Ubuntu/Windows × Python 3.11/3.12 CI 全绿。CodeRabbit 正式评审指出重复完成可能覆盖完成证据；已增加拒绝重复完成及保留原证据的回归，当前修订 CI 待完成。当前本地项目没有安全切换分支的 Git 工作区，未在旧 checkout 运行测试；以最新 PR CI 为自动验证。下一步等待最新 CI 并检查评审状态，满足条件后合并，按 STATUS 请 Lan 验收。
+- 2026-10-21 Codex：工单 040 的 PR #78 已完成代码修改、回归与评审。最新 main 基线 8d71b06d52efaa65ee1dc4a535bc62fc5fef632a；独立分支 ticket/040-long-task-progress。完成路径保留 40 条原进度，在容量已满时单独持久化最终证据；兼容旧快照；重复完成更新被拒绝以保留首次证据。假数据回归检查实际 JSON、重启、状态展示、后续新任务及 os.replace 失败保护。GitHub Actions 最新 Windows/Linux × Python 3.11/3.12 全绿；CodeRabbit 正式评审中的唯一功能意见已修复、确认并解决。因本地项目没有安全切换分支的 Git 工作区，未在旧 checkout 运行测试；以 PR CI 为验证依据。下一步 Lan 按 STATUS 验收；无真实任务数据或付费模型参与。
 - 2026-10-21 10:22 UTC Codex：工单 039 从 main fb6211e 开始，分支 ticket/039-hidden-memory-context，只修 031-03。旧版虚构数据已复现隐藏后开场正文仍进入最终模型上下文。仅在 memory_agent.py 增加原生生命周期重新校验和失败保守过滤，memory_native.py 成功修改后同步有效可见性；未改审批、预算、调度或上游。直接记忆回归 90 项全部通过，含假模型真实请求断言；原始虚构聊天字节未变。PR #76 代码提交 a75a5e5 的完整 Windows/Linux × Python 3.11/3.12 CI 全部通过，正式小兔子 full review 完成、无须处理的意见。收尾仅更新状态文档，生产代码与回归未变；最终检查及合并状态以 PR #76 为准。未跑付费模型、未访问私人数据。下一步 Lan 按 STATUS 验收；Windows 体验未验收。本单停止，不自行领取下一单。
 - 工单 038：PR #75 已合并为 main fb6211e，此前暂停/等待审查记录已不适用。能力状态事务代码保留；Windows 体验待 Lan 验收。
 
