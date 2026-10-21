@@ -104,6 +104,7 @@ class LongTaskStore:
         if (not all(isinstance(value[key], str) for key in
                     ('task_id', 'title', 'goal', 'status', 'next_step', 'waiting_for',
                      'created_at', 'updated_at')) or value['status'] not in TASK_STATUS
+                or not isinstance(value.get('completion_evidence', ''), str)
                 or not isinstance(value['progress'], list)
                 or not all(isinstance(item, dict) and isinstance(item.get('text'), str)
                            and isinstance(item.get('time'), str) for item in value['progress'])
@@ -160,6 +161,7 @@ class LongTaskStore:
                                                'created_at', 'updated_at')}
         self._localize_model_state(summary)
         summary['pending_action'] = self._pending_view(task['pending_action'])
+        summary['completion_evidence'] = task.get('completion_evidence', '')
         summary['progress'] = task['progress'][-8:]
         summary['tool_events'] = [self._model_event(event) for event in task['tool_events'][-8:]]
         return json.dumps(summary, ensure_ascii=False, separators=(',', ':'))
@@ -172,6 +174,7 @@ class LongTaskStore:
                                                'next_step', 'waiting_for')}
         self._localize_model_state(summary)
         summary['pending_action'] = self._pending_view(task['pending_action'])
+        summary['completion_evidence'] = task.get('completion_evidence', '')
         summary['progress'] = task['progress'][-3:]
         summary['tool_events'] = [self._model_event(event) for event in task['tool_events'][-4:]]
         return json.dumps(summary, ensure_ascii=False, separators=(',', ':'))
@@ -234,7 +237,7 @@ class LongTaskStore:
             task = {'task_id': uuid.uuid4().hex, 'title': title.strip(), 'goal': goal.strip(),
                     'status': 'active', 'progress': [], 'next_step': '拆分并开始第一项可验证工作。',
                     'waiting_for': '', 'tool_events': [], 'pending_action': None,
-                    'created_at': stamp, 'updated_at': stamp}
+                    'completion_evidence': '', 'created_at': stamp, 'updated_at': stamp}
             self._save(task)
         return f"长期任务已建立，编号 {task['task_id']}。", '成功', task['title']
 
@@ -272,9 +275,13 @@ class LongTaskStore:
             if task['pending_action'] and status == 'completed' and not resolve:
                 return '程序拒绝：尚有结果未核实的操作，不能标记任务完成。', '被拒绝', task['title']
             if progress:
+                if status == 'completed':
+                    task['completion_evidence'] = progress.strip()
                 if len(task['progress']) >= MAX_PROGRESS_ITEMS:
-                    return '进度证据已达保存上限；请先用 progress_update 总结已有证据后再继续。', '被拒绝', task['title']
-                task['progress'].append({'time': now(), 'text': progress.strip()})
+                    if status != 'completed':
+                        return '进度证据已达保存上限；请先用 progress_update 总结已有证据后再继续。', '被拒绝', task['title']
+                else:
+                    task['progress'].append({'time': now(), 'text': progress.strip()})
             if resolve:
                 pending = task['pending_action']
                 task['tool_events'].append({'time': now(), 'tool': pending['tool'],
