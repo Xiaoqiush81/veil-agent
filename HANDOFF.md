@@ -1,6 +1,8 @@
 - 2026-10-21 Codex：工单 043 从 main `a48f13dec08d89ea2d1667ff550ae2e4cbe6baca` 建立分支 `ticket/043-long-task-side-effect-verification`，PR #80。修复 031-06：稳定操作 ID、规范目标、文件内容效果摘要与真实读回；非文件操作及旧非文件 checkpoint 需精确目标的成功只读回读，旧操作 ID 稳定派生。CodeRabbit 指出的非文件 pending 卡死已修复并回帖；当前代码 head `92323e82906633457b967101f50c7ca16f7dbed4` 的 Ubuntu/Windows × Python 3.11/3.12 CI 全绿。Claude 评论请求尚无回复，GitHub reviewer API 不允许请求 `claude`（非协作者）；未把其他审查冒充 Claude。下一步是获得 Claude 独立审查、确认最终文档 head CI 后再合并。Lan 的 A–E Windows 体验仍待验收；040 行为保留，044 不在范围。
 # 交接
 
+- 2026-10-21 Codex：工单 046 在分支 `ticket/046-cold-backup`、PR #82。`--replace` 现将目标 `data/`、`characters/`、`persona/`、`.env` 整体移动到 `*.before-restore-*`；失败时整套移回。新增恢复后置备份记忆不残留、整套回滚及 manifest 符号链接拒绝测试，并修正根项目校验循环缩进和繁体错误字。定向回归 11/11、语法编译和 diff 检查通过；测试仅使用虚构角色数据。最新提交待推送和 CI。Claude 独立审查和 Lan 的 Windows A–E 体验仍待完成。备份含明文敏感数据，用户需选加密的本地盘/受保护介质；不上传云服务。
+
 - 2026-10-21 Codex：工单 044 继续在 PR #81 `ticket/044-memory-diagnostics-tool-errors`。已把 main `8df2099c90bd6681ebfeab4f0302e7390a992e52` 作为第二父提交合入，合并提交 `6eb3e36b724ab043721f6d571fb5d1d79bdbeab5`，以 main 为底保留 043/040 的实现与状态记录。当前代码/测试提交 `ac6a40cbfba39c5b27c074da640f7232f0c8e6e3` 将 `long_tasks.py`、`memory_native.py`、`tools_agent.py`、`veil_agent.py`、`memory_agent.py` 的工具失败原因改为英文；失败结果由 `model_tool_result()` 原样传递；回归扫描失败结果文本及安全诊断；页面和模型显示同一句。Actions run 692 的 Windows/Linux × Python 3.11/3.12 全绿。Claude 独立审查待 Lan 手动安排；收到意见后处理必要的功能/安全问题并复核 CI，再合并。真实数据未读取；Lan 的 Windows 虚构记忆聊天验收待合并后进行。
 
 - 2026-10-21 Claude：PR #77（042）与 PR #79（041）因小兔子限流由 Claude 审查，CI 全绿后合并；两单 Windows 体验待 Lan 验收。
