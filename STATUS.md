@@ -1,8 +1,10 @@
 # 当前状态
 
-更新：2026-10-21 · 045（PR #83）与 046（PR #82）由 Claude 审查后合入；044、043、041、042、040 已合入
+更新：2026-10-22 · 工单 048（PR #87，key 隔离补丁待 CI）；049 已合入；045（PR #83）与 046（PR #82）已合入；044、043、041、042、040 已合入
 
 ## 当前目标与现状
+
+- **048 实验 017 适配新版 Ombre HTTP 接口（031-11）：** 分支 `ticket/048-ombre-http-adapter`，PR #87。实验入口复用隔离 Streamable HTTP 实例和 `memory_agent.MCP`；实验启动时明确将 `proxy-dummy` 传给 Ombre 脱水及 embedding key，预算代理原有凭据和转发路径不变。新增回归覆盖模拟 `.env` 下占位 key 覆盖与默认启动行为；本次补丁的定向/完整 CI 待确认。此前 Actions run 793 的 Windows/Linux × Python 3.11/3.12 四个任务通过（各 307 项测试，4 项可选跳过）。真实角色记忆与供应商请求未触碰；完整质量复跑会产生真实模型费用，不纳入本单回归。
 
 - **049 记忆可见性误判（Claude 修复）：** 记忆文件里 `relation_links` 下的缩进 `type: same_event` 被当成顶层 `type`，重复键导致“可见性无法确认”，有关联的记忆每轮都被拦下并提示。现在只读顶层键。Windows 验收：pull 后聊几句，那条英文提示不应每轮出现，Peter 能想起有关联的记忆。
 
@@ -21,9 +23,11 @@
 
 ## 下一步
 
-045 与 046 已由 Claude 审查合入；Lan 按下方 045、046 步骤做 Windows 验收。
+PR #87 的 HTTP 适配与 key 隔离补丁完成后，等待当前 head 的 CI；此前 CodeRabbit 未提交审查意见（仓库不足 10 星，自动审查关闭）。CI 通过后交给 Lan 安排 Claude 审查与合并，不由 Codex 合并。Lan 可按本页 048 步骤运行虚构回归，再用空隔离库确认 HTTP/MCP 握手；完整质量复跑会产生费用。
 
 ## Windows 验收
+
+- **048：** 运行完整测试 `python -m unittest discover -s tests`，确认模拟 `.env` 中的值被两个 `proxy-dummy` 覆盖且默认 Ombre 启动仍读取既有配置；HTTP 接线回归确认虚构 token、地址传递正确，模拟连接失败关闭隔离进程。安装 Ombre 固定依赖后运行 `python experiments/memory-quality-017/run_experiment.py --preflight-ombre`，确认空实验 vault 的 HTTP/MCP 握手完成且账本付费请求为零。完整盲测重跑会产生真实模型费用，不以本步骤冒充免费体验。
 
 - **045：** 用虚构角色和假模型确认预算充足时保存/检索有账本 reserve/settle；预算不足时后端调用次数不增加；请求失败和重启后预留仅结算一次、无 pending。上游异步计划判断及 HTTP 绕行路径仍未通过体验验收，不标记为已受硬控。
 
