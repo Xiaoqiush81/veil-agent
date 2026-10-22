@@ -993,6 +993,9 @@ class Chat:
         ]
 
     def send(self, text, *, autonomy=False, extra_context=None, media=None):
+        # Per-call durability fact used by UI adapters when failures can occur
+        # both before and after the user row is appended.
+        self.last_send_persisted = False
         self.sent_messages = []
         self.reply_displayed = False
         self.autonomy_mode = autonomy
@@ -1071,6 +1074,7 @@ class Chat:
                     event['media'] = {key: media[key] for key in ('id', 'filename', 'mime', 'name')
                                      if isinstance(media.get(key), str)}
                 self.store.append(self.path, event)
+                self.last_send_persisted = True
         try:
             self._capability_request_active = True
             self.last_self = description
@@ -1601,7 +1605,7 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead, activity=N
                 except TooLong as exc:
                     complete = getattr(raw_text, 'complete', None)
                     if callable(complete):
-                        complete(False)
+                        complete(bool(getattr(chat, 'last_send_persisted', False)))
                     output(str(exc))
                     continue
                 except RequestFailed as exc:

@@ -12,7 +12,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from veil_agent import (Chat, Budget, Store, build_self_description, estimate_request_tokens,
-                        load_character, make_model, model_tool_result, run_chat, UserError, RequestFailed)
+                        load_character, make_model, model_tool_result, run_chat, UserError,
+                        RequestFailed, TooLong)
 
 
 def sent_facts(messages):
@@ -397,6 +398,22 @@ output_cny_per_million = "8"
             self.chat.send('keep me')
         self.assertEqual(self.store.read('test/chat.jsonl')[0]['content'], 'keep me')
         self.assertGreater(Budget(self.store).totals()[2], 0)
+
+    def test_send_reports_whether_too_long_happened_before_or_after_persistence(self):
+        self.cfg.provider['max_input_tokens'] = 1
+        with self.assertRaises(TooLong):
+            self.chat.send('too large before append')
+        self.assertFalse(self.chat.last_send_persisted)
+        self.assertEqual(self.store.read('test/chat.jsonl'), [])
+
+        self.cfg.provider['max_input_tokens'] = 6000
+        self.chat.tool_mode = True
+        with patch.object(self.chat, '_tool_chat', side_effect=TooLong('tool result too large')):
+            with self.assertRaises(TooLong):
+                self.chat.send('saved before tool overflow')
+        self.assertTrue(self.chat.last_send_persisted)
+        self.assertEqual(self.store.read('test/chat.jsonl')[-1]['content'],
+                         'saved before tool overflow')
 
     def test_ctrl_c_at_prompt_keeps_displayed_reply(self):
         output = []

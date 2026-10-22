@@ -395,10 +395,10 @@ async function detectImageType(file){
   return null;
 }
 function canvasBlob(canvas,quality){return new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality))}
-async function prepareImage(file){
+async function prepareImage(file,mime){
   if(file.size>25*1024*1024)throw new Error('source too large');
   if(typeof ImageDecoder==='function'){
-    const decoder=new ImageDecoder({data:file.stream(),type:file.type});
+    const decoder=new ImageDecoder({data:file.stream(),type:mime});
     try{await decoder.tracks.ready;const track=decoder.tracks.selectedTrack;if(!track||track.codedWidth*track.codedHeight>40_000_000)throw new Error('too many pixels')}
     finally{decoder.close()}
   }
@@ -421,7 +421,7 @@ async function chooseImage(file){
   const mime=await detectImageType(file);
   if(!mime){if(choice===imageChoice)add('error','只支持 PNG、JPEG、GIF 或 WebP 图片。');return}
   let prepared;
-  try{prepared=await prepareImage(file)}catch(e){if(choice===imageChoice)add('error','图片无法处理或处理后仍超过 5 MB。');return}
+  try{prepared=await prepareImage(file,mime)}catch(e){if(choice===imageChoice)add('error','图片无法处理或处理后仍超过 5 MB。');return}
   if(choice!==imageChoice)return;
   clearImage(false);
   selectedImage={file:prepared,url:URL.createObjectURL(prepared),media:null,mime:prepared.type,choice,key:crypto.randomUUID()};

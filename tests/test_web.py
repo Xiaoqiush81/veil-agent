@@ -162,7 +162,7 @@ output_cny_per_million = "8"
     def test_invalid_replacement_does_not_clear_selected_photo_first(self):
         page = (Path(__file__).resolve().parents[1] / 'web' / 'index.html').read_text(encoding='utf-8')
         choose = page[page.index('async function chooseImage'):page.index('imageButton.onclick')]
-        self.assertGreater(choose.index('clearImage(false)'), choose.index('prepareImage(file)'))
+        self.assertGreater(choose.index('clearImage(false)'), choose.index('prepareImage(file,mime)'))
 
     def test_image_request_rejects_bad_metadata_and_commands(self):
         self.hub.busy = False
