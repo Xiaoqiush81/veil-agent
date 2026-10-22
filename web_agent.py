@@ -47,6 +47,7 @@ class Hub:
         self.submissions = OrderedDict()  # recent request ids -> normalized text digest
         self.autonomy = None
         self.capability_record = lambda: None
+        self.current_capabilities = lambda: 'Current capabilities are not available.'
         self.autonomy_busy = False
         self.autonomy_interrupted = threading.Event()
 
@@ -198,6 +199,7 @@ class Hub:
                     'stopping': self.stopping and not self.stopped, 'stopped': self.stopped,
                     'name': self.name, 'pending': self.pending, 'ready': self.ready,
                     'activity_enabled': self.activity.enabled(),
+                    'current_capabilities': self.current_capabilities(),
                     'capability_record': self.capability_record(),
                     'memory_panel_url': self.memory_url, **autonomy}
 
@@ -325,6 +327,8 @@ def serve_chat(chat, hub):
         hub.push(message['role'], message['content'], time=message['time'], history=True)
     hub.autonomy = AutonomyController(chat, hub)
     hub.capability_record = lambda: getattr(chat.tools, 'capability_record', None)
+    chat.activity_enabled = hub.activity.enabled
+    hub.current_capabilities = chat.current_capability_snapshot
     try:
         run_chat(chat, input_fn=hub.input_fn, output=hub.output, drop=lambda: False,
                  activity=hub.activity, autonomy=hub.autonomy)

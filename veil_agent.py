@@ -670,6 +670,7 @@ class Chat:
         self.sent_messages = []
         self.reply_displayed = False
         self.autonomy_mode = False
+        self.activity_enabled = lambda: False
         self.autonomy_should_yield = None
         self.autonomy_run_id = None
         self.autonomy_message_output = None
@@ -699,6 +700,56 @@ class Chat:
                     'Do not reproduce whole files or inventories in arguments.')
                 schema['function'] = function
         return schemas
+
+    def current_capability_snapshot(self, schemas=None):
+        """Describe only abilities the program will actually offer on this request."""
+        from tools_agent import tool_policy
+        schemas = self.tool_schemas() if schemas is None else schemas
+        rows = []
+        for schema in schemas:
+            function = schema.get('function', {})
+            name = function.get('name')
+            if not isinstance(name, str):
+                continue
+            description = function.get('description', '').strip()
+            description = re.sub(r'(?i)\b[a-z]:\\[^\s<>"\']+', '[configured location]', description)
+            policy = tool_policy(name)
+            if policy == 'allow':
+                permission = 'Direct use.'
+            elif policy == 'ask':
+                permission = 'Requires Lan\'s approval where policy requires it.'
+            elif policy == 'lab':
+                permission = 'Lab only; no overwrite, deletion, or scripts.'
+            elif name == 'trace':
+                permission = 'Deletion requires explicit user approval; autonomous requests wait for later approval.'
+            else:
+                permission = 'Available only within the limits described below.'
+            rows.append(f'- {name}: {description} {permission}'.strip())
+        files = getattr(self.tools, 'files', None) if self.tools else None
+        if not isinstance(getattr(files, 'tools', None), (list, tuple)):
+            files = self.tools
+        if not rows:
+            notice = getattr(files, 'startup_notice', None)
+            if notice or getattr(files, 'client', None) is None and getattr(files, 'enabled', None) is True:
+                rows.append('- File tools: currently unavailable because the filesystem service is not running.')
+            elif self.tools and getattr(files, 'enabled', True) is False:
+                rows.append('- File tools: disabled by this role configuration.')
+            else:
+                rows.append('- No callable tools are currently offered to the model.')
+        file_tools = getattr(files, 'tools', [])
+        if not isinstance(file_tools, (list, tuple)):
+            file_tools = []
+        offered_file_tools = {getattr(tool, 'name', None) for tool in file_tools}
+        if not offered_file_tools:
+            if getattr(files, 'startup_notice', None):
+                rows.append('- File tools: currently unavailable because the filesystem service is not running.')
+            elif self.tools and getattr(files, 'enabled', True) is False:
+                rows.append('- File tools: disabled by this role configuration.')
+        activity = (True if self.autonomy_mode else
+                    self.activity_enabled() if callable(self.activity_enabled) else False)
+        rows.append(f'- Autonomous activity: {"enabled" if activity else "paused or unavailable"}.')
+        rows.append('- VEIL enforces permissions; this list grants none.')
+        return 'CURRENT CAPABILITIES (live runtime):\n' + '\n'.join(rows)
 
     def send_message(self, arguments, request_id, tool_call_id=None):
         try:
@@ -826,6 +877,11 @@ class Chat:
         # capability notice, time and ledger) right before the user's message.
         head = [{'role': 'system', 'content': self.cfg.persona},
                 {'role': 'system', 'content': stable}]
+        tool_schema = []
+        tool_config = self.cfg.tools or {}
+        if self.tool_mode and tool_config.get('max_steps', 1) > 1:
+            tool_schema = self.tool_schemas()
+        head.append({'role': 'system', 'content': self.current_capability_snapshot(tool_schema)})
         record = capability_record(self.tools)
         if record:
             head.append({'role': 'system', 'content': record})
@@ -837,10 +893,6 @@ class Chat:
                 'Program-generated capability update: ' + self.pending_capability_event_model})
         tail.append({'role': 'system', 'content': changing})
         user = {'role': 'user', 'content': text}
-        tool_schema = []
-        tool_config = self.cfg.tools or {}
-        if self.tool_mode and tool_config.get('max_steps', 1) > 1:
-            tool_schema = self.tool_schemas()
         # The input limit is in tokens, not UTF-8 bytes. Start with the same
         # conservative byte-to-token floor used by the tool loop; schema bytes
         # are included but must not be counted one-for-one as tokens.
@@ -1325,6 +1377,7 @@ def pending_deletion_context(chat):
 
 def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead, activity=None, autonomy=None):
     activity = activity or ActivityState(chat.store.root / chat.cfg.id / 'resident-state.json')
+    chat.activity_enabled = activity.enabled
     output(f'接上了 {chat.rounds} 轮。输入 /cost 查花费，/autonomy 查自主记录，/self 看当前说明，'
            '/pause 或 /resume 切换自主活动，/quit 退出。')
     if getattr(chat.tools, 'startup_notice', None):

@@ -84,6 +84,15 @@ output_cny_per_million = "8"
         self.hub.capability_record = lambda: record
         self.assertEqual(self.hub.snapshot(0)['capability_record'], record)
 
+    def test_snapshot_exposes_current_capabilities_from_the_same_generator_as_chat(self):
+        chat = Chat(self.cfg, self.store, Budget(self.store), self.model)
+        self.hub.current_capabilities = chat.current_capability_snapshot
+        chat.send('fictional capability question')
+        model_messages = self.model.call_args.args[0]
+        sent = next(item['content'] for item in model_messages if item['role'] == 'system'
+                    and item['content'].startswith('CURRENT CAPABILITIES'))
+        self.assertEqual(self.hub.snapshot(0)['current_capabilities'], sent)
+
     def test_submission_deduplication_window_is_bounded(self):
         hub = Hub('Test', ActivityState(self.store.root / 'test' / 'other-state.json'))
         with patch('web_agent.MAX_SUBMISSIONS', 2):

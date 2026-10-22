@@ -54,7 +54,7 @@ output_cny_per_million = "8"
         self.assertEqual(reopened.rounds, 1)
         reopened.send('Continue')
         messages = self.model.call_args.args[0]
-        self.assertEqual([m['content'] for m in messages[2:-2]], ['虚构的中文消息', 'A fictional reply'])
+        self.assertEqual([m['content'] for m in messages[3:-2]], ['虚构的中文消息', 'A fictional reply'])
         self.assertEqual(messages[-2]['role'], 'system')
         self.assertEqual(messages[-1]['content'], 'Continue')
         rows = self.store.read('test/chat.jsonl')
@@ -103,6 +103,81 @@ output_cny_per_million = "8"
         self.assertEqual(notice, tools.capability_event)
         self.assertEqual(self.store.read('test/tools.jsonl'), [])
 
+    def test_real_tool_request_contains_current_capabilities_not_only_tool_schemas(self):
+        schemas = [
+            {'type': 'function', 'function': {'name': 'lab_file_digest',
+             'description': 'Read metadata only for a regular file inside lab; no outside access.',
+             'parameters': {'type': 'object', 'properties': {}}}},
+            {'type': 'function', 'function': {'name': 'move_lab_file',
+             'description': 'Move one file only inside lab; existing targets are rejected.',
+             'parameters': {'type': 'object', 'properties': {}}}},
+        ]
+        files = SimpleNamespace(tools=[SimpleNamespace(name=item['function']['name'],
+            description=item['function']['description'], inputSchema=item['function']['parameters'])
+            for item in schemas], description='Fictional lab tools.', startup_notice=None,
+            capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock(), client=object(), lab=SimpleNamespace(name='lab'))
+        tools = SimpleNamespace(tools=files.tools, files=files, description=files.description,
+            capability_event=None, capability_event_model=None, capability_record=None,
+            startup_notice=None, consume_capability_event=Mock())
+        model = Mock(return_value=(SimpleNamespace(content='I can inspect and move lab files within those limits.',
+            tool_calls=[]), 100, 20, 0))
+        chat = Chat(replace(self.cfg, tools={'enabled': True, 'max_steps': 2}),
+                    self.store, self.budget, model, tools=tools)
+
+        chat.send('What tools can you use right now, and what are their limits?')
+
+        messages = model.call_args.args[0]
+        prompt_text = '\n'.join(item['content'] for item in messages if item['role'] == 'system')
+        self.assertIn('CURRENT CAPABILITIES', prompt_text)
+        self.assertIn('lab_file_digest', prompt_text)
+        self.assertIn('move_lab_file', prompt_text)
+        self.assertIn('Lab only', prompt_text)
+        sent_snapshot = next(item['content'] for item in messages if item['role'] == 'system'
+                             and item['content'].startswith('CURRENT CAPABILITIES'))
+        self.assertEqual(sent_snapshot, chat.current_capability_snapshot(model.call_args.kwargs['tools']))
+        offered = {item['function']['name'] for item in model.call_args.kwargs['tools']}
+        self.assertTrue({'lab_file_digest', 'move_lab_file', 'long_task_status',
+                         'long_task_update', 'send_message'} <= offered)
+
+    def test_current_capability_snapshot_tracks_removed_tools_and_service_failure(self):
+        files = SimpleNamespace(tools=[SimpleNamespace(name='search_files',
+            description='Search configured folder.', inputSchema={'type': 'object'})],
+            description='Fictional tools.', startup_notice=None, enabled=True, client=object(),
+            capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock())
+        tools = SimpleNamespace(tools=files.tools, files=files, description=files.description,
+            capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock())
+        chat = Chat(replace(self.cfg, tools={'enabled': True, 'max_steps': 2}),
+                    self.store, self.budget, self.model, tools=tools)
+        current = chat.current_capability_snapshot()
+        self.assertIn('search_files', current)
+        files.tools.clear()
+        files.startup_notice = 'Fictional file service is unavailable.'
+        unavailable = chat.current_capability_snapshot()
+        self.assertNotIn('search_files', unavailable)
+        self.assertIn('currently unavailable', unavailable)
+
+    def test_denied_tool_is_neither_offered_nor_claimed(self):
+        tools = SimpleNamespace(tools=[
+            SimpleNamespace(name='search_files', description='Search allowed files.',
+                            inputSchema={'type': 'object'}),
+            SimpleNamespace(name='edit_file', description='Must remain denied.',
+                            inputSchema={'type': 'object'}),
+            SimpleNamespace(name='future_private_tool', description='Unknown tool.',
+                            inputSchema={'type': 'object'}),
+        ], capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock(), description='Fictional tools.')
+        chat = Chat(replace(self.cfg, tools={'enabled': True, 'max_steps': 2}),
+                    self.store, self.budget, self.model, tools=tools)
+        offered = chat.tool_schemas()
+        snapshot = chat.current_capability_snapshot(offered)
+        self.assertIn('search_files', snapshot)
+        self.assertNotIn('edit_file', snapshot)
+        self.assertNotIn('future_private_tool', snapshot)
+        self.assertNotIn('edit_file', {item['function']['name'] for item in offered})
+
     def test_failed_capability_delivery_stays_pending_then_delivers_once(self):
         notice = ('Capability update: added lab_file_digest and move_lab_file. Both are direct-use only '
                   'inside the lab folder; they cannot overwrite, delete, or run scripts.')
@@ -141,6 +216,9 @@ output_cny_per_million = "8"
         chat.send('fictional autonomous wake', autonomy=True)
         tools.consume_capability_event.assert_not_called()
         self.assertEqual(self.store.read('test/tools.jsonl'), [])
+        autonomous_prompt = '\n'.join(item['content'] for item in model.call_args.args[0])
+        self.assertIn('CURRENT CAPABILITIES', autonomous_prompt)
+        self.assertIn('Autonomous activity: enabled', autonomous_prompt)
 
         chat.send('fictional normal chat')
         prompt = model.call_args.args[0]
@@ -420,7 +498,8 @@ output_cny_per_million = "8"
             chat = Chat(self.cfg, self.store, self.budget, model)
             self.assertEqual(chat.send('中文输入'), '模拟回复')
             self.assertEqual(requests[0]['messages'][-1]['content'], '中文输入')
-            self.assertEqual([m['role'] for m in requests[0]['messages']], ['system', 'system', 'system', 'user'])
+            self.assertEqual([m['role'] for m in requests[0]['messages']],
+                             ['system', 'system', 'system', 'system', 'user'])
             self.assertEqual(requests[0]['messages'][0]['content'], self.cfg.persona)
             self.assertEqual(sent_facts(requests[0]['messages']), chat.last_self)
             self.assertEqual(requests[0]['max_tokens'], 50)
@@ -533,7 +612,7 @@ output_cny_per_million = "8"
         self.assertNotEqual(first, second)
         self.assertIn('Tuesday', second)
         self.assertIn('3 recent rounds', second)
-        self.assertEqual(sum(m['role'] == 'system' for m in messages), 3)
+        self.assertEqual(sum(m['role'] == 'system' for m in messages), 4)
         self.assertEqual([r['role'] for r in self.store.read('test/chat.jsonl')],
                          ['user', 'assistant', 'user', 'assistant'])
 
@@ -563,7 +642,7 @@ output_cny_per_million = "8"
         self.assertEqual(roles[0], 'system')
         self.assertEqual(roles[-1], 'user')
         self.assertEqual(sent[-1]['content'], 'continue')
-        history = [m for m in sent[2:-2]]
+        history = [m for m in sent[3:-2]]
         self.assertTrue(history and history[0]['role'] == 'user')  # Whole rounds only.
         self.assertTrue(history[-1]['content'].startswith('a19'))  # Newest kept.
         self.assertLessEqual(estimate_request_tokens(sent, []),
@@ -601,7 +680,7 @@ output_cny_per_million = "8"
         self.assertEqual(self.store.read('costs.jsonl'), costs)
 
     def test_english_long_message_fits_with_large_authorized_tool_schemas(self):
-        self.cfg.provider['max_input_tokens'] = 32768
+        self.cfg.provider['max_input_tokens'] = 40000
         self.cfg.tools = {'enabled': True, 'max_steps': 6, 'max_output_tokens': 50}
         names = ['list_directory', 'directory_tree', 'read_text_file', 'read_multiple_files',
                  'get_file_info', 'search_files', 'list_directory_with_sizes', 'hold',

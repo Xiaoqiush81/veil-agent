@@ -815,7 +815,8 @@ max_result_bytes = 200
 
     def test_tool_result_drops_oldest_history_round_before_reply(self):
         self.cfg.tools['max_result_bytes'] = 6000
-        self.store.append('test/chat.jsonl', {'role': 'user', 'content': 'old ' + 'x' * 2100})
+        self.cfg.provider['max_input_tokens'] = 8000
+        self.store.append('test/chat.jsonl', {'role': 'user', 'content': 'old ' + 'x' * 3500})
         self.store.append('test/chat.jsonl', {'role': 'assistant', 'content': 'old answer'})
         first = self.message([self.tool_call('read_text_file', '{"path":"test.txt"}', 'read')])
         final = self.message(content='The file has test data.')
@@ -824,7 +825,7 @@ max_result_bytes = 200
         def model(messages, **_kwargs):
             requests.append(json.loads(json.dumps(messages)))
             # Report a prompt size that matches the request, as a real provider would.
-            return responses[len(requests) - 1], min(6000, len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) + 256 * len(messages) + 500), 20, 0
+            return responses[len(requests) - 1], min(8000, len(json.dumps(messages, ensure_ascii=False).encode('utf-8')) + 256 * len(messages) + 500), 20, 0
         tools = Mock()
         tools.tools = [SimpleNamespace(name='read_text_file', description='Read', inputSchema={})]
         tools.capability_event = None
