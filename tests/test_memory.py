@@ -541,6 +541,23 @@ class MemoryTests(unittest.TestCase):
         })
         self.assertNotIn('FICTIONAL_QUERY', self.diagnostics_text())
 
+    def test_retrieval_failure_records_safe_mcp_stage_without_query_or_memory(self):
+        def fail_search(name, args):
+            if name == 'breath_search':
+                raise MemoryToolError('unknown', stage='mcp_initialize')
+            return ''
+        self.backend.call = Mock(side_effect=fail_search)
+        self.memory.context('FICTIONAL_QUERY')
+        row = json.loads(self.diagnostics_text().splitlines()[-1])
+        self.assertEqual(row, {
+            'time': row['time'], 'code': 'retrieval_failed', 'stage': 'breath_search',
+            'error_type': 'MemoryToolError', 'error_code': 'unknown',
+            'mcp_stage': 'mcp_initialize',
+        })
+        notice = ' '.join(self.memory.notices())
+        self.assertIn('Safe failure stage: mcp_initialize.', notice)
+        self.assertNotIn('FICTIONAL_QUERY', self.diagnostics_text())
+
     def test_extraction_uses_its_own_cap_without_reasoning(self):
         self.turns(4)
         self.memory.supplement()
