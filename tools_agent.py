@@ -147,6 +147,7 @@ class FilesystemTools:
         from veil_agent import UserError
         self.root = Path(root).resolve()
         self.cfg, self.store = cfg, store
+        self.cap_path = Path(store.root) / cfg.id / 'capabilities.json'
         self.lab = None
         settings = cfg.tools or {}
         if cfg.tools is None:
@@ -173,7 +174,6 @@ class FilesystemTools:
             raise UserError('文件工具文件夹必须位于该角色自己的 data 目录。')
         self.workspace = configured
         self.workspace.mkdir(parents=True, exist_ok=True)
-        self.cap_path = Path(store.root) / cfg.id / 'capabilities.json'
         self.grant_path = Path(store.root) / cfg.id / 'append-grant.json'
         self.tools = []
         self.client = None
@@ -409,6 +409,19 @@ class FilesystemTools:
         row['capability_updates'] = updates
 
     @capability_transaction
+    def record_capability_change(self, event):
+        """Persist a dated runtime ability change in the existing role history."""
+        try:
+            row = json.loads(self.cap_path.read_text(encoding='utf-8')) if self.cap_path.exists() else {}
+            if not isinstance(row, dict):
+                raise ValueError('invalid capability record')
+            self._record_update(row, event)
+            save_capabilities(self.cap_path, row)
+        except Exception as exc:
+            from veil_agent import UserError
+            raise UserError('能力清单无法更新，未切换自主活动状态；请保留 data 文件夹。') from exc
+
+    @capability_transaction
     def consume_capability_event(self, delivered_event=None):
         try:
             row = json.loads(self.cap_path.read_text(encoding='utf-8'))
@@ -429,7 +442,7 @@ class FilesystemTools:
 
     @capability_transaction
     def announce_autonomy(self):
-        if getattr(self, 'cap_path', None) is None:
+        if getattr(self, 'cap_path', None) is None or getattr(self, 'enabled', None) is False:
             return
         try:
             row = json.loads(self.cap_path.read_text(encoding='utf-8'))

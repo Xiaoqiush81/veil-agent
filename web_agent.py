@@ -48,6 +48,7 @@ class Hub:
         self.autonomy = None
         self.capability_record = lambda: None
         self.current_capabilities = lambda: 'Current capabilities are not available.'
+        self.activity_transition = lambda enabled: self.activity.set(enabled)
         self.autonomy_busy = False
         self.autonomy_interrupted = threading.Event()
 
@@ -131,9 +132,12 @@ class Hub:
         with self.cond:
             if self.stopping or self.stopped:
                 return False
-            if enabled and not self.activity.enabled() and self.autonomy is not None:
+            previous = self.activity.enabled()
+            if previous == enabled:
+                return True
+            if enabled and self.autonomy is not None:
                 self.autonomy.announce_autonomy()
-            self.activity.set(enabled)
+            self.activity_transition(enabled)
             return True
 
     def submit(self, text, request_id):
@@ -326,7 +330,8 @@ def serve_chat(chat, hub):
     for message in chat.history_events:
         hub.push(message['role'], message['content'], time=message['time'], history=True)
     hub.autonomy = AutonomyController(chat, hub)
-    hub.capability_record = lambda: getattr(chat.tools, 'capability_record', None)
+    hub.capability_record = lambda: chat.capability_history_record
+    hub.activity_transition = lambda enabled: chat.set_activity_enabled(hub.activity, enabled)
     chat.activity_enabled = hub.activity.enabled
     hub.current_capabilities = chat.current_capability_snapshot
     try:

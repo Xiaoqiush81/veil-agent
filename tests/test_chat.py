@@ -153,6 +153,9 @@ output_cny_per_million = "8"
                     self.store, self.budget, self.model, tools=tools)
         current = chat.current_capability_snapshot()
         self.assertIn('search_files', current)
+        final_step_chat = Chat(replace(self.cfg, tools={'enabled': True, 'max_steps': 1}),
+                              self.store, self.budget, self.model, tools=tools)
+        self.assertNotIn('search_files', final_step_chat.current_capability_snapshot())
         files.tools.clear()
         files.startup_notice = 'Fictional file service is unavailable.'
         unavailable = chat.current_capability_snapshot()
@@ -177,6 +180,44 @@ output_cny_per_million = "8"
         self.assertNotIn('edit_file', snapshot)
         self.assertNotIn('future_private_tool', snapshot)
         self.assertNotIn('edit_file', {item['function']['name'] for item in offered})
+
+    def test_final_tool_loop_request_and_live_panel_do_not_claim_tools_not_offered(self):
+        tool_call = SimpleNamespace(id='digest-call', function=SimpleNamespace(
+            name='lab_file_digest', arguments='{"path":"lab/sample.txt"}'))
+        first = SimpleNamespace(content=None, tool_calls=[tool_call],
+            model_dump=lambda exclude_none=True: {'role': 'assistant', 'content': None,
+                'tool_calls': [{'id': 'digest-call', 'type': 'function', 'function': {
+                    'name': 'lab_file_digest', 'arguments': '{"path":"lab/sample.txt"}'}}]})
+        final = SimpleNamespace(content='Digest complete.', tool_calls=[],
+            model_dump=lambda exclude_none=True: {'role': 'assistant', 'content': 'Digest complete.'})
+        files = SimpleNamespace(tools=[SimpleNamespace(name='lab_file_digest',
+            description='Return byte length and SHA-256 metadata for one regular file inside lab only.',
+            inputSchema={'type': 'object', 'properties': {'path': {'type': 'string'}}})],
+            description='Fictional Lab tool.', startup_notice=None, enabled=True, client=object(),
+            capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock())
+        tools = SimpleNamespace(tools=files.tools, files=files, description=files.description,
+            capability_event=None, capability_event_model=None, capability_record=None,
+            consume_capability_event=Mock(), invoke=Mock(return_value=('digest metadata', '成功', 'lab/sample.txt')))
+        chat = Chat(replace(self.cfg, tools={'enabled': True, 'max_steps': 2}),
+                    self.store, self.budget, Mock(), tools=tools, output=lambda _: None)
+        calls = []
+        def fake_model(messages, **kwargs):
+            snapshot = next(item['content'] for item in messages if item['role'] == 'system'
+                            and item['content'].startswith('CURRENT CAPABILITIES'))
+            calls.append((snapshot, chat.current_capability_snapshot(), kwargs.get('tools')))
+            return (first if len(calls) == 1 else final), 100, 20, 0
+        chat.model.side_effect = fake_model
+
+        chat.send('Please calculate the fictional Lab file digest.')
+
+        self.assertIn('lab_file_digest', calls[0][0])
+        self.assertEqual(calls[0][0], calls[0][1])
+        self.assertIn('Lab only', calls[0][0])
+        self.assertNotIn('lab_file_digest', calls[1][0])
+        self.assertIn('No callable tools', calls[1][0])
+        self.assertEqual(calls[1][0], calls[1][1])
+        self.assertIsNone(calls[1][2])
 
     def test_failed_capability_delivery_stays_pending_then_delivers_once(self):
         notice = ('Capability update: added lab_file_digest and move_lab_file. Both are direct-use only '
@@ -680,14 +721,14 @@ output_cny_per_million = "8"
         self.assertEqual(self.store.read('costs.jsonl'), costs)
 
     def test_english_long_message_fits_with_large_authorized_tool_schemas(self):
-        self.cfg.provider['max_input_tokens'] = 40000
+        self.cfg.provider['max_input_tokens'] = 32768
         self.cfg.tools = {'enabled': True, 'max_steps': 6, 'max_output_tokens': 50}
         names = ['list_directory', 'directory_tree', 'read_text_file', 'read_multiple_files',
                  'get_file_info', 'search_files', 'list_directory_with_sizes', 'hold',
                  'breath_search', 'trace', 'dream', 'letter_write', 'letter_read', 'plan']
         schema = {'type': 'object', 'properties': {'query': {'type': 'string'}}}
         tools = SimpleNamespace(
-            tools=[SimpleNamespace(name=name, description='Search the selected memory and return useful results. ' * 42,
+            tools=[SimpleNamespace(name=name, description='Search the selected memory and return useful results.',
                                    inputSchema=schema) for name in names],
             capability_event=None, description='Authorized tools are available. ')
         chat = Chat(self.cfg, self.store, self.budget, self.model, tools=tools)
