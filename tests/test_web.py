@@ -121,15 +121,19 @@ output_cny_per_million = "8"
         self.assertEqual(saved['media']['id'], media['id'])
         sent_user = next(item for item in self.model.call_args.args[0] if item['role'] == 'user')
         self.assertIsInstance(sent_user['content'], list)
-        self.assertTrue(sent_user['content'][1]['image_url']['url'].startswith('data:image/png;base64,'))
+        self.assertEqual(sent_user['content'][1], {
+            'type': 'image_url', 'image_url': {
+                'url': 'data:image/png;base64,' + base64.b64encode(png).decode()}})
         reopened_chat = Chat(self.cfg, self.store, Budget(self.store), self.model)
         self.assertEqual(next(row for row in reversed(reopened_chat.history_events)
                              if row['role'] == 'user')['media']['id'], media['id'])
-        self.assertEqual(next(row for row in reversed(reopened_chat.history)
-                             if row['role'] == 'user')['content'], '[Lan sent a photo]')
+        reopened_user = next(row for row in reversed(reopened_chat.history) if row['role'] == 'user')
+        self.assertIsInstance(reopened_user['content'], list)
+        self.assertEqual(reopened_user['content'][1], sent_user['content'][1])
         reopened = Hub('Test', ActivityState(self.store.root / 'test' / 'other-state.json'),
                        media_root=self.store.root / 'test' / 'media')
         self.assertEqual(reopened.media_for_request('test-request-1')['id'], media['id'])
+        self.assertEqual(reopened.submit('[图片]', 'test-request-1', media['id']), 'duplicate')
 
     def test_image_request_rejects_bad_metadata_and_commands(self):
         self.hub.busy = False
@@ -140,6 +144,9 @@ output_cny_per_million = "8"
         self.assertEqual(status, 400)
         self.assertFalse(self.hub.busy)
         status, _ = self.call('/api/send', {'text': 'hello', 'media': {'id': ''}})
+        self.assertEqual(status, 400)
+        self.assertFalse(self.hub.busy)
+        status, _ = self.call('/api/send', {'text': 'hello', 'media': {}})
         self.assertEqual(status, 400)
         self.assertFalse(self.hub.busy)
         status, result = self.call('/api/media', {'mime': 'image/png', 'name': 'fictional.png', 'data': png})
@@ -172,6 +179,15 @@ output_cny_per_million = "8"
                        media_root=media_root)
         self.assertEqual(reopened.media_info(first['id'])['request_id'], 'first')
         self.assertEqual((media_root / 'index.jsonl').read_text(), json.dumps(first) + '\n')
+
+    def test_restart_removes_unindexed_final_media_from_interrupted_commit(self):
+        media_root = self.store.root / 'test' / 'orphan-media'
+        media_root.mkdir(parents=True)
+        orphan = media_root / (('b' * 32) + '.jpg')
+        orphan.write_bytes(b'orphan')
+        Hub('Test', ActivityState(self.store.root / 'test' / 'orphan-state.json'),
+            media_root=media_root)
+        self.assertFalse(orphan.exists())
 
     def test_snapshot_exposes_the_same_capability_record_used_by_peter(self):
         record = 'CAPABILITY RECORD\n2026-10-22T00:00:00+00:00: Capability update: added fictional_tool.'

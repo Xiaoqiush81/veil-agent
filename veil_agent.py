@@ -665,7 +665,7 @@ def estimate_request_tokens(messages, tools=None, calibration=0.5):
 
 
 def collapse_latest_photo(messages):
-    """After the first provider request, keep the caption but do not resend image bytes to tool steps."""
+    """Replace the newest real photo with its durable text placeholder."""
     for message in reversed(messages):
         content = message.get('content') if isinstance(message, dict) else None
         if message.get('role') == 'user' and isinstance(content, list):
@@ -951,11 +951,15 @@ class Chat:
             raise UserError('聊天记录无法读取，已停止；请保留 data 文件夹。') from exc
         groups = groups[-history_keep(len(groups), self.cfg.history_rounds):]
         self.history_events = [{**m, 'origin': m.get('origin', 'reply')} for group in groups for m in group]
+        latest_photo = next((index for index in range(len(self.history_events) - 1, -1, -1)
+                             if self.history_events[index]['role'] == 'user'
+                             and isinstance(self.history_events[index].get('media'), dict)), None)
         model_history = []
-        for message in self.history_events:
+        for index, message in enumerate(self.history_events):
             content = message['content']
             if message['role'] == 'user' and isinstance(message.get('media'), dict):
-                content = PHOTO_PLACEHOLDER + (('\n' + content) if content != '[图片]' else '')
+                content = (self._photo_content(content, message['media']) if index == latest_photo else
+                           PHOTO_PLACEHOLDER + (('\n' + content) if content != '[图片]' else ''))
             model_history.append({'role': message['role'], 'content': content})
         return model_history, sum(any(m['role'] == 'assistant' for m in g) for g in groups)
 
@@ -1028,7 +1032,11 @@ class Chat:
         def bound(history):
             return estimate_request_tokens([*head, *history, *tail, user], tool_schema)
         limit = self.cfg.provider['max_input_tokens']
-        history = list(self.history)
+        # collapse_latest_photo mutates message dictionaries; keep the durable
+        # in-memory history intact while preparing this request's model view.
+        history = [dict(message) for message in self.history]
+        if isinstance(media, dict):
+            collapse_latest_photo(history)
         # Long replies make the window outgrow the limit. Drop the oldest whole
         # rounds from this request only; chat.jsonl keeps everything.
         while history and bound(history) > limit:
@@ -1225,8 +1233,6 @@ class Chat:
                 calibration = min(1.0, prompt / sent_bytes)
                 measured_tokens, measured_bytes = prompt, sent_bytes
             self.budget.settle(reservation, step_cfg, prompt, completion, cached)
-            if step == 0:
-                collapse_latest_photo(loop_messages)
             if autonomy and self.autonomy_should_yield and self.autonomy_should_yield():
                 self.autonomy_interrupted = True
                 final = 'Autonomous activity yielded after the model request to let chat or a control action proceed.'

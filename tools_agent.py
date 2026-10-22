@@ -350,7 +350,8 @@ class FilesystemTools:
                    'memory_tools': previous.get('memory_tools', []) if previous else [],
                    'capability_updates': previous.get('capability_updates', []) if previous else [],
                    'autonomy_announced': bool(previous and previous.get('autonomy_announced')),
-                   'long_tasks_announced': bool(previous and previous.get('long_tasks_announced'))}
+                   'long_tasks_announced': bool(previous and previous.get('long_tasks_announced')),
+                   'photo_input_announced': bool(previous and previous.get('photo_input_announced'))}
             self._record_update(row, self.capability_event)
             if previous != row:
                 save_capabilities(self.cap_path, row)

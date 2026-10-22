@@ -44,8 +44,12 @@ def valid_media_row(row):
         return False
     media_id, filename, mime = row.get('id'), row.get('filename'), row.get('mime')
     return (isinstance(media_id, str) and MEDIA_ID_PATTERN.fullmatch(media_id) is not None
-            and mime in MEDIA_TYPES and filename == media_id + MEDIA_TYPES[mime][0]
-            and isinstance(row.get('name'), str) and isinstance(row.get('request_id'), str))
+            and isinstance(mime, str) and mime in MEDIA_TYPES
+            and filename == media_id + MEDIA_TYPES[mime][0]
+            and isinstance(row.get('name'), str) and isinstance(row.get('request_id'), str)
+            and (row.get('submission_digest') is None or
+                 (isinstance(row.get('submission_digest'), str)
+                  and re.fullmatch(r'[0-9a-f]{64}', row['submission_digest']) is not None)))
 
 
 class ChatInput(str):
@@ -105,10 +109,18 @@ class Hub:
                     if not valid_media_row(row):
                         raise ValueError('invalid media index row')
                     self.media_index[row['id']] = row
+                    digest = row.get('submission_digest')
+                    if digest:
+                        self.submissions[row['request_id']] = bytes.fromhex(digest)
             except FileNotFoundError:
                 pass
             except (OSError, ValueError, UnicodeError) as exc:
                 raise UserError('图片索引无法读取，已停止；请保留 data 文件夹。') from exc
+            indexed = {row['filename'] for row in self.media_index.values()}
+            for candidate in self.media_root.iterdir():
+                if (candidate.is_file() and candidate.name not in indexed
+                        and re.fullmatch(r'[0-9a-f]{32}\.(?:png|jpg|gif|webp)', candidate.name)):
+                    candidate.unlink(missing_ok=True)
 
     def media_info(self, media_id):
         with self.media_lock:
@@ -139,15 +151,18 @@ class Hub:
         row = {'id': media_id, 'filename': filename, 'mime': mime,
                'name': Path(original_name).name[:120] or 'image'}
         with self.media_lock:
+            if len(self.pending_media) >= MAX_PENDING_MEDIA:
+                return None
             pending_path = self.upload_root / filename
-            pending_path.write_bytes(raw)
+            try:
+                pending_path.write_bytes(raw)
+            except OSError:
+                pending_path.unlink(missing_ok=True)
+                raise
             self.pending_media[media_id] = row
-            while len(self.pending_media) > MAX_PENDING_MEDIA:
-                _, expired = self.pending_media.popitem(last=False)
-                (self.upload_root / expired['filename']).unlink(missing_ok=True)
         return dict(row)
 
-    def commit_media(self, media_id, request_id):
+    def commit_media(self, media_id, request_id, submission_digest):
         """Move one uploaded image into durable history, or return an existing commit."""
         if media_id is None:
             return None
@@ -158,7 +173,8 @@ class Hub:
             pending = self.pending_media.get(media_id)
             if not pending:
                 return None
-            row = {**pending, 'request_id': request_id}
+            row = {**pending, 'request_id': request_id,
+                   'submission_digest': submission_digest.hex()}
             source = self.upload_root / row['filename']
             target = self.media_root / row['filename']
             index = self.media_root / 'index.jsonl'
@@ -304,7 +320,7 @@ class Hub:
             elif self.busy:
                 return 'busy'
             try:
-                media = self.commit_media(media_id, request_id)
+                media = self.commit_media(media_id, request_id, text_digest)
             except OSError:
                 return 'media_storage'
             if media_id is not None and not media:
@@ -450,6 +466,8 @@ def make_handler(hub, token):
                         raise ValueError
                 except (ValueError, base64.binascii.Error):
                     self._send(400, {'error': 'invalid image'})
+                except OSError:
+                    self._send(500, {'error': 'image storage failed'})
                 else:
                     self._send(201, {'ok': True, 'media': media})
                 return
@@ -473,7 +491,8 @@ def make_handler(hub, token):
                 else:
                     text = text.strip()
                     supplied_media = body.get('media') if 'media' in body else None
-                    if supplied_media is not None and not isinstance(supplied_media, dict):
+                    if (supplied_media is not None and
+                            (not isinstance(supplied_media, dict) or supplied_media.get('id') is None)):
                         result = 'media'
                     else:
                         media_id = supplied_media.get('id') if supplied_media is not None else None
