@@ -1,5 +1,11 @@
 # 交接
 
-- 2026-10-22 Codex：工单 065，分支 `ticket/065-safe-main-auto-update`，PR #101，已合入最新 main `ed85643`。本次自动更新失败的直接原因是本地 `main` 在 14:23 被 `git pull --ff-only origin ticket/062-memory-write-reconciliation` 误推进到 `6045e0a`，而远端通过 squash 历史继续前进；旧更新器只能快进，因此必然失败。
-- 异常旧指针保存在本地分支 `backup-main-before-update-20261022-1430`，3 个提交没有删除。`update-main.cmd` 现在快进失败时会先创建 `backup/main-before-update-<旧 SHA>`，并在 reset 前阻止远端 tracked 路径覆盖 ignored 本地文件，成功后返回原工单分支。隔离 Windows Git 仓库回归先复现旧脚本返回 1，现覆盖碰撞阻断、恢复更新和连续第二次运行。
-- Cubic 对 #101 提出的两项实质问题（重复运行未覆盖、ignored 文件可能被覆盖）已在 `b30d14e` 修复并解决评论。PR #100 已合并至 main `ed85643`，第三阶段门禁证据完整；065 不改动其结论。下一个窗口第一步：核对 #101 合并 main 后最新提交的六项 CI 与 Cubic，全部通过后合并，再请 Lan 双击更新器两次验收。
+- 工单 067，分支 `ticket/067-windows-runtime-validation`，基于 main `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。另一个进行中的工单已占用 066，因此本次运行验证按仓库连续编号使用 067；未改动 066 的文件或工作区。
+- PR #101 已合并为 `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。合并前 head `b0158c72c2fe0efd26c5173c6c6e22e18b56231a` 的 Tests #915、Dependency security #56 成功，Cubic 实质意见已解决。旧 STATUS/HANDOFF 曾把 #101 留作下一步，本分支已纠正。
+- 已完成 Windows Electron fake-service smoke、桌面后端 2 项、Python 离线回归 350 项（跳过 3 项）、Ombre 隔离恢复门禁 1 项。还实际启动/退出/重启了虚构角色 Python Agent 与本地 Ombre、MCP；后端认证复用成功，恢复后聊天文件字节不变；MCP 在虚构 Lab 内创建、读取、追加，并拒绝目录穿越。
+- 所有隔离角色配置和数据都在本机忽略目录，没有提交；未读取或修改 `data/peter`，未发普通聊天或调用模型。Electron 窗口到真实 Python Agent 的组合场景、聊天模型、模型驱动工具、后台自主调度、长时间运行和桌面备份恢复仍未验证。不得宣称第四阶段完成或启动第五阶段。
+- 未发现有证据的阻断产品故障，本 PR 仅更新工单、状态和交接。
+
+## 下一个窗口第一步
+
+核对 PR #067 的当前提交、六项必需 CI 和 Cubic；实质意见修复后按 main 保护流程合并。合并后请 Lan 在本机隔离虚构角色目录按 `STATUS.md` 完成三步体验验收，再根据结果安排未验证场景。
