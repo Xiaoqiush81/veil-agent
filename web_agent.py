@@ -54,9 +54,10 @@ def valid_media_row(row):
 
 
 class ChatInput(str):
-    def __new__(cls, text, media):
+    def __new__(cls, text, media, complete=None):
         value = super().__new__(cls, text)
         value.media = media
+        value.complete = complete or (lambda _committed: None)
         return value
 
 
@@ -114,6 +115,8 @@ class Hub:
                     digest = row.get('submission_digest')
                     if digest:
                         self.submissions[row['request_id']] = bytes.fromhex(digest)
+                        if len(self.submissions) > MAX_SUBMISSIONS:
+                            self.submissions.popitem(last=False)
             except FileNotFoundError:
                 pass
             except (OSError, ValueError, UnicodeError) as exc:
@@ -193,7 +196,7 @@ class Hub:
             moved = False
             try:
                 import os
-                with source.open('rb') as image_handle:
+                with source.open('rb+') as image_handle:
                     os.fsync(image_handle.fileno())
                 source.replace(target)
                 moved = True
@@ -256,7 +259,7 @@ class Hub:
                 with self.cond:
                     self.busy = True
                 if isinstance(text, tuple):
-                    return ChatInput(text[0], text[1])
+                    return ChatInput(text[0], text[1], text[2] if len(text) > 2 else None)
                 return text
             if self.stopping or self.stopped:
                 raise EOFError
@@ -277,7 +280,7 @@ class Hub:
             with self.cond:
                 self.busy = True
             if isinstance(text, tuple):
-                return ChatInput(text[0], text[1])
+                return ChatInput(text[0], text[1], text[2] if len(text) > 2 else None)
             return text
 
     def request_stop(self):
@@ -339,20 +342,25 @@ class Hub:
                 return 'media_storage'
             if media_id is not None and not media:
                 return 'media'
+            def complete(committed):
+                if committed:
+                    self.push('user', text, media=media, request_id=request_id)
             if self.autonomy_busy:
-                self.push('user', text, **({'media': media} if media else {}))
+                if not media:
+                    self.push('user', text, request_id=request_id)
                 self.submissions[request_id] = text_digest
                 if len(self.submissions) > MAX_SUBMISSIONS:
                     self.submissions.popitem(last=False)
-                self.inbox.put((text, media) if media else text)
+                self.inbox.put((text, media, complete) if media else text)
                 self.autonomy_interrupted.set()
                 return 'accepted'
             self.busy = True
-            self.push('user', text, **({'media': media} if media else {}))
+            if not media:
+                self.push('user', text, request_id=request_id)
             self.submissions[request_id] = text_digest
             if len(self.submissions) > MAX_SUBMISSIONS:
                 self.submissions.popitem(last=False)
-            self.inbox.put((text, media) if media else text)
+            self.inbox.put((text, media, complete) if media else text)
             return 'accepted'
 
     def approval(self, prompt):

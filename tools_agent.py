@@ -380,6 +380,8 @@ class FilesystemTools:
             changes.append('Autonomous activity remains enabled; you may act or choose not to on each scheduled wake.')
         if previous.get('long_tasks_announced'):
             changes.append('Long-task tools remain available to save one active task and continue it after restart.')
+        if previous.get('photo_input_announced'):
+            changes.append('Photo input remains available; the newest photo is visible directly and older photos use placeholders.')
         memory_tools = previous.get('memory_tools')
         if isinstance(memory_tools, list) and memory_tools:
             changes.append('Memory tools are available: ' + ', '.join(str(name) for name in memory_tools) +

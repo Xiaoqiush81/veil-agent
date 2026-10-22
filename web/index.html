@@ -115,7 +115,7 @@ let speechRecognition=null, speechSession=null, speechState='idle', speechStopRe
 let after=0, busy=true, stopping=false, stopped=false, typing=null, sending=false;
 let revealQueue=[], revealTimer=null, roundStartedAt=0, roundHasReply=false, previousMessage=null;
 let pendingApproval=null, activityEnabled=false, exiting=false;
-let selectedImage=null;
+let selectedImage=null,awaitingImage=null;
 let imageChoice=0;
 const draftRequests=new Map();
 const IMAGE_TYPES=new Set(['image/png','image/jpeg','image/gif','image/webp']);
@@ -240,6 +240,7 @@ function revealNext(){
   if(delay)revealTimer=setTimeout(reveal,delay);else reveal();
 }
 function receiveEvent(e,initial){
+  if(e.kind==='user'&&awaitingImage&&selectedImage===awaitingImage){clearImage();awaitingImage=null}
   if(initial||e.history){
     if(e.kind==='user'){roundStartedAt=Date.parse(e.time)||Date.now();roundHasReply=false}
     if(e.kind==='assistant')roundHasReply=true;
@@ -288,8 +289,10 @@ function setBusy(b){
   if((!waiting||stopped)&&typing){typing.remove();typing=null}
 }
 async function api(path,body){
-  const r=await fetch(path,{method:body?'POST':'GET',headers:{'X-Token':token||'','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
-  return r;
+  let timer;
+  const request=fetch(path,{method:body?'POST':'GET',headers:{'X-Token':token||'','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});
+  const timeout=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('request timeout')),30000)});
+  try{return await Promise.race([request,timeout])}finally{clearTimeout(timer)}
 }
 async function approve(card,status,answer,id){
   if(card.dataset.sending==='true'||card.classList.contains('done'))return;
@@ -394,6 +397,11 @@ async function detectImageType(file){
 function canvasBlob(canvas,quality){return new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',quality))}
 async function prepareImage(file){
   if(file.size>25*1024*1024)throw new Error('source too large');
+  if(typeof ImageDecoder==='function'){
+    const decoder=new ImageDecoder({data:file.stream(),type:file.type});
+    try{await decoder.tracks.ready;const track=decoder.tracks.selectedTrack;if(!track||track.codedWidth*track.codedHeight>40_000_000)throw new Error('too many pixels')}
+    finally{decoder.close()}
+  }
   const bitmap=await createImageBitmap(file);
   const scale=Math.min(1,2048/Math.max(bitmap.width,bitmap.height));
   const canvas=document.createElement('canvas');
@@ -448,7 +456,6 @@ async function send(text){
   const payloadKey=text+'\0'+(attachedImage?.key||'');
   if(fromBox&&!draftRequests.has(payloadKey)){
     draftRequests.set(payloadKey,crypto.randomUUID());
-    if(draftRequests.size>32)draftRequests.delete(draftRequests.keys().next().value);
   }
   const requestId=fromBox?draftRequests.get(payloadKey):crypto.randomUUID();
   if(attachedImage?.cancel)attachedImage.cancel.disabled=true;
@@ -471,7 +478,8 @@ async function send(text){
         }
         draftRequests.delete(payloadKey);
       }
-      if(attachedImage&&selectedImage===attachedImage)clearImage();
+      if(attachedImage&&selectedImage===attachedImage&&result.duplicate)clearImage();
+      else if(attachedImage)awaitingImage=attachedImage;
       if(result.duplicate)add('notice','这条消息此前已提交，没有重复发送。');
     }
   }catch(e){add('error',attachedImage?'图片发送未确认，图片仍在发送区；请稍后重试。':'发送结果未确认，输入已保留；页面不会自动重发。')}

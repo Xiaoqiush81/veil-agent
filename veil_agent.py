@@ -1599,12 +1599,21 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead, activity=N
                 try:
                     reply = chat.send(text, extra_context=pending_deletion_context(chat), media=media)
                 except TooLong as exc:
+                    complete = getattr(raw_text, 'complete', None)
+                    if callable(complete):
+                        complete(False)
                     output(str(exc))
                     continue
                 except RequestFailed as exc:
+                    complete = getattr(raw_text, 'complete', None)
+                    if callable(complete):
+                        complete(True)
                     output(str(exc))
                     notify_dropped()
                     continue
+                complete = getattr(raw_text, 'complete', None)
+                if callable(complete):
+                    complete(True)
                 if chat.trim_note:
                     output(chat.trim_note)
                 if not chat.reply_displayed:

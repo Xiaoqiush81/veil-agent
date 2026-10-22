@@ -119,6 +119,8 @@ output_cny_per_million = "8"
             self.assertEqual(response.read(), png)
         saved = next(row for row in reversed(self.store.read('test/chat.jsonl')) if row['role'] == 'user')
         self.assertEqual(saved['media']['id'], media['id'])
+        self.assertEqual(saved['content'], '[图片]')
+        self.assertNotIn('base64', json.dumps(saved))
         sent_user = next(item for item in self.model.call_args.args[0] if item['role'] == 'user')
         self.assertIsInstance(sent_user['content'], list)
         self.assertEqual(sent_user['content'][1], {
