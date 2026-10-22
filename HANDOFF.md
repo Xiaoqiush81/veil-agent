@@ -1,8 +1,7 @@
 # 交接
 
-- 2026-10-22 Codex：工单 063，分支 `ticket/063-github-quality-gates`，基于最新 main `8f59d04dadf7bf6f99000e85c46fb7dbf4db5cd4`。本地已建立分支，保留了原有未跟踪 `.worktrees/` 内容。
-- 依据 GitHub 事实纠正前置状态：PR #98 已合并，merge commit 为 `8f59d04dadf7bf6f99000e85c46fb7dbf4db5cd4`；PR head `1d09780d50b39eb7fa2d69c5b960c59fc87f7950` 的 Tests run #885 四平台和 Dependency security run #43 均成功。自动回归通过不代表 main 的 branch protection 已设置，也不代表 Windows 真人体验完成。
-- 阶段二自动退出条件已通过源码测试证据核对：记忆隔离/历史/检索、恢复与不确定写入、自主任务检查点和重启、文件权限与读回、备份校验与失败回滚均有回归。Lan 的 Windows 体验尚未验收。
-- `AGENTS.md`、ticket skill 和 PR-review skill 已加入开工前核对并对齐 Cubic 流程；`docs/RELIABILITY.md` 已记录阶段二自动回归退出、阶段三当前进行。PR #99 前一 head `f34eeda` 的 Tests #890 四个平台与 Dependency security #45 两个作业成功，Cubic review 为 No issues found；head `45e9ce1` 的 Tests #892 四个平台与 Dependency security #46 两个作业也成功。Cubic 随后指出交接把 `f34eeda` 误标为当前 head；已在 `93b20b3` 将其改为前一 head、补充 `45e9ce1` 的结果、回复并解决该评论。后续 SHA 的最新 CI / Cubic 状态以 GitHub PR #99 为准，需在交接时重新核对。
-- GitHub 仓库工具显示当前连接身份拥有 admin 权限，但可用接口没有 branch protection / rulesets 读取或写入操作；本机没有 `gh` 命令，浏览器工具不能读取 GitHub REST 规则端点。main 规则状态因此保持未知。候选 required checks 是四个 `offline-chat (OS, Python)` 作业，加 `audit` 和 `scanner-report-smoke`。不得把 Cubic `COMMENTED` review 当成 required status check。
-- 下一窗口第一步：从 GitHub 核对 PR #99 最新 SHA 的 CI 和 Cubic 状态；然后取得 main 分支保护的实际配置证据。取得 main 保护配置后，用隔离 PR 验证失败阻断、修复放行、必要检查缺失仍阻断；如果 Lan 必须在 GitHub Settings 手动启用规则，按 STATUS 的六项检查及管理员强制保护完成后再继续。
+- 2026-10-22 Codex：工单 064，分支 `ticket/064-stage-three-exit`，基于 main `d4641390f3fa8df0b97697d18ac601a14086d8b0`。PR #99 已合并，不再按开放状态处理。
+- #99 最终 head `8a27740f5256420c44ceaa6621cbda93248588af`：Tests #898 的 Windows/Linux × Python 3.11/3.12 四项均成功，Dependency security #49 的 `audit` 与 `scanner-report-smoke` 均成功；Cubic 最新结果为 No issues found，唯一实质评论已解决。merge commit 为 `d4641390f3fa8df0b97697d18ac601a14086d8b0`。
+- GitHub Rulesets API 已只读核实 `VEIL Main Protection`（ID `25620335`）为 active，目标为默认分支，包含 PR、严格同步、六项必需检查、禁止删除和禁止非快进更新；返回配置没有绕过主体。不得重复创建或修改该 Ruleset。
+- #99 在 Ruleset 建立前已经合并，因此其绿色 CI 与合并记录不能单独证明失败/缺项拦截。本单将在隔离 PR 先提交一个虚构失败探针，确认必需检查失败并阻止合并；随后删除探针，确认未完成检查继续阻止、六项通过后恢复放行。最终 PR 不保留探针，不修改生产代码。
+- 下一步：推送隔离失败提交并创建 #64 PR；记录 GitHub 合并资格与六项检查结果。完成失败证据后删除探针，更新 STATUS/HANDOFF 为最终退出结论，再执行最新 CI 与 Cubic。
