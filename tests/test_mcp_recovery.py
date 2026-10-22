@@ -10,14 +10,14 @@ from memory_agent import MCP, MemoryToolError
 
 
 class FakeMCP(MCP):
-    def __init__(self, outcomes):
+    def __init__(self, outcomes, recovery=None):
         self.outcomes = deque(outcomes)
         self.sessions = 0
         self.active = 0
         self.peak = 0
         self.calls = []
         self.exit_error = None
-        super().__init__('http://example.invalid/mcp', 'fixture-token')
+        super().__init__('http://example.invalid/mcp', 'fixture-token', recovery=recovery)
 
     @asynccontextmanager
     async def _session(self):
@@ -72,6 +72,54 @@ class MCPRecoveryTests(unittest.TestCase):
         self.assertEqual(len(client.calls), 2)
         self.assertEqual(client.call('pulse', {}), 'recovered')
 
+    def test_runtime_recovery_is_single_flight_and_mutation_is_not_replayed(self):
+        recovered = []
+        client = self.backend([ConnectionError('lost reply'), 'later read'])
+        client.recovery = lambda: recovered.append('verified')
+        with self.assertRaises(MemoryToolError) as failed:
+            client.call('hold', {'content': 'fictional'})
+        self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(client.calls, ['hold'])
+        self.assertEqual(recovered, ['verified'])
+        self.assertEqual(client.call('pulse', {}), 'later read')
+
+    def test_concurrent_transport_failures_share_one_recovery_owner(self):
+        recovered = []
+        client = self.backend([ConnectionError(), 'one', 'two'])
+        client.recovery = lambda: recovered.append('verified')
+        with ThreadPoolExecutor(2) as pool:
+            results = list(pool.map(lambda _: client.call('pulse', {}), range(2)))
+        self.assertEqual(set(results), {'one', 'two'})
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(client.peak, 1)
+
+    def test_recovery_failure_is_bounded_and_does_not_log_exception_text(self):
+        client = self.backend([ConnectionError('fixture-secret')])
+        diagnostics = []
+        client.diagnostic = diagnostics.append
+        client.recovery = lambda: (_ for _ in ()).throw(RuntimeError('fixture-secret'))
+        with self.assertRaises(MemoryToolError) as failed:
+            client.call('hold', {'content': 'fictional'})
+        self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(client.calls, ['hold'])
+        self.assertNotIn('fixture-secret', json.dumps(diagnostics))
+        self.assertEqual(client.recovery_count, 1)
+
+    def test_runtime_recovery_stops_after_two_failed_attempts(self):
+        attempts = []
+        client = self.backend([ConnectionError()] * 3)
+
+        def fail_recovery():
+            attempts.append(1)
+            raise RuntimeError('synthetic startup failure')
+
+        client.recovery = fail_recovery
+        for _ in range(3):
+            with self.assertRaises(MemoryToolError):
+                client.call('pulse', {})
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(client.recovery_count, 2)
+
     def test_uncertain_mutation_is_never_replayed(self):
         for name in ('hold', 'trace', 'dream', 'plan', 'letter_write', 'breath_search'):
             with self.subTest(name=name):
@@ -113,6 +161,23 @@ class MCPRecoveryTests(unittest.TestCase):
         self.assertFalse(client.thread.is_alive())
         with self.assertRaises(MemoryToolError):
             client.call('pulse', {})
+
+    def test_queued_call_wait_includes_jobs_ahead(self):
+        from concurrent.futures import Future
+        from unittest import mock
+
+        client = self.backend(['queued result'])
+        original_result = Future.result
+        timeouts = []
+
+        def record_timeout(future, timeout=None):
+            timeouts.append(timeout)
+            return original_result(future, timeout=timeout)
+
+        with mock.patch.object(client.requests, 'qsize', return_value=3), \
+             mock.patch.object(Future, 'result', new=record_timeout):
+            self.assertEqual(client.call('pulse', {}), 'queued result')
+        self.assertEqual(timeouts, [1050])
 
 
 if __name__ == '__main__':

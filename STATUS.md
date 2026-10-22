@@ -1,12 +1,14 @@
 # 当前状态
 
-更新：2026-10-22 05:35 UTC · Codex。061（PR #97）新增 Cubic 审查修复提交 `c7d07ae`，上一 head `c120aef` 的 Tests #860 与 Dependency security #32 已全绿；本次更新的 CI 待推送后检查。060（PR #96）并行施工，未合并；058（PR #95）已合入 main `560bf602`；057（PR #94）已合入；056（PR #93）已合入；055（PR #92）自动回归与 GitHub CI 已通过，待 Lan 安排复核和 Windows 虚构数据体验；054（PR #91）与 053（PR #90）已合入；052（PR #89）、051（PR #88）、047 Windows 桌面版 0.1（PR #84）、050（PR #86，原撞号 047）、048（PR #87）及 049、045、046、044、043、041、042、040 均已合入
+更新：2026-10-22 05:52 UTC · Codex。060（PR #96）已合入 main `b50230e`；061（PR #97）正在处理最后一条 Cubic 测试意见并同步最新 main；058（PR #95）及更早已合入的工单状态见下文。
 
 ## 当前目标与现状
 
-- **061 Peter Lab 文件归档：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，独立分支 `ticket/061-lab-archive`，PR #97，代码修复提交 `c7d07ae`。Peter 只可在普通 lab 目录与 `lab/archive/` 之间移动单个普通文件；拒绝覆盖、删除、lab 外路径、链接和成长日记。新增仅返回 byte length/SHA-256 的 lab 内校验工具，供大文件长期任务恢复核验；POSIX 移动改用无覆盖原子重命名并在源身份变化时安全回滚。Cubic 四项均已核实：三项代码/回归缺口已修复，一项过期 HANDOFF 状态将随本更新修正。针对性用例 27 项中 26 项通过、1 项因本机沙箱不支持 hardlink 跳过；本机 Windows junction 用例不能创建，完整 `test_tools` 执行停在 filesystem server 用例，未宣称全量通过。上一 head `c120aef` 的 Tests #860（Windows/Linux × Python 3.11/3.12）与 Dependency security #32 全绿；当前 head CI 待推送后检查。Lan 的 Windows 归档、恢复、冲突、保护边界和重启体验未验收。下一步检查新 head CI 与 Cubic 复审状态，再交 Lan 按验收步骤体验；不合并。
+- **061 Peter Lab 文件归档：** 分支 `ticket/061-lab-archive`，PR #97。只允许普通 lab 文件在工作目录与 `lab/archive/` 之间移动；程序校验路径、文件身份、长度与 SHA-256，拒绝冲突、删除、lab 外路径、链接及成长日记移动。Cubic 的大文件核验、POSIX 并发替换、硬链接回归均已修复；最后一条评论指出竞态测试没有真正调用原子无覆盖重命名，已修正为在目标竞态出现后调用真实 `_rename_noreplace`。已同步 main `b50230e`，STATUS/HANDOFF 冲突均保留 main 的 060 信息并补回 061 记录。上一 head `25a4a71` 的 Tests #866 与 Dependency security #35 全绿；最新提交 CI、Cubic 复审及最终合并状态待刷新。定向测试此前 27 项中 26 项通过、1 项因沙箱不支持 hardlink 跳过；当前 Windows `py.exe` App Execution Alias 仍无法启动，未将最新回归或真实 Windows 体验记作通过。下一步检查推送后 CI/复审，满足条件后合并 PR #97，再由 Lan 按验收步骤体验。
 
-- **058 记忆检索分支隔离与安全诊断：** PR #95 已合入 main `560bf602`；记忆检索分支隔离和隐私安全诊断已上线，Lan 的 Windows 虚构数据体验仍待验收。
+- **060 Ombre 运行期生命周期与安全恢复：** PR #96 已合入 main `b50230e`。能力与自动验证已入 main，Lan 的 Windows 体验验收仍待进行。
+
+- **058 记忆检索分支隔离与安全诊断：** PR #95 已合入 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。实际症状只证明 Ombre MCP 连接/服务路径故障，不证明 embedding、供应商、某条记忆或数据损坏；没有读取私人诊断、记忆、查询、密钥或调用模型。该 PR 为检索失败隔离和安全诊断，不实现运行期进程恢复。其余实现和验收边界以 PR #95 为准。
 
 - **057 持久化中断与安全恢复回归：** 基于 main `fce02d2`，分支 `ticket/057-process-recovery-contract`。新增真实 Python 子进程回归：宿主在文件已实际写入、但工具回执未保存时实际 kill 子进程；新进程读到持久化 pending，只有精确读回才可解除，执行记录保持一次。恢复测试在旧组件移入安全副本后、部分新组件安装后、全部新组件安装但清理前实际 kill 子进程；此前会留下可能被普通启动读取的半套目标，现以目标根目录的持久化未完成恢复标记和 `Store` fail-closed 拒绝修复，完整旧安全副本保留，明确重跑恢复后才清除标记。全部数据均为临时虚构数据；未访问真实人设、记忆、聊天或密钥，未调用模型。开发端 Python 运行时当前不可执行，完整 Windows/Linux × Python 3.11/3.12 CI 待 PR 后验证；Lan Windows 体验待验收。
 
@@ -43,11 +45,9 @@
 
 ## 下一步
 
-检查 PR #97 的 GitHub CI 和会影响实际功能或安全的审查意见；按 Lan 指示不自行合并、不等待 CodeRabbit。
+复核 058 变更，提交、推送并开 PR；检查最新提交的完整 CI；不申请 Claude 审查或自行合并。
 
 ## Windows 验收
-
-- **061：** ① 让 Peter 自主归档小游戏 v1、v2，确认工作目录只留 v3、`archive/play/` 中两份文件字节完整。② 让 Peter 阅读归档 v1 并移回 lab 内其他位置；制造同名目标冲突，确认原目标和源文件均未覆盖或丢失。③ 尝试永久删除、移出 lab、普通目录间移动、移动目录/链接及移动 `growth-journal.md`，确认程序拒绝；重启后归档仍存在且能读取、恢复。
 
 - **058：** ① 在隔离虚构角色中建立可见和隐藏记忆，正常聊天确认 Peter 自动使用可见记忆、不能说出隐藏正文。② 人为模拟 `feel`、`breath_search` 或单条可见性检查失败，确认提示明确阶段且其他已确认可见记忆仍可用。③ 人为模拟自主活动的 `hold` 失败，检查该角色 `memory/_agent/diagnostics.jsonl`：仅有工具/阶段和异常类型，不能出现虚构查询、记忆正文或密钥；不使用真实数据或付费模型。
 
