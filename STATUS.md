@@ -13,6 +13,8 @@
 
 ## 下一步
 
+- **新功能工单已写好，待 Codex 施工：** 071 给 Peter 发图片（`docs/tickets/071-send-photos.md`，DeepSeek `deepseek-flash` 原生看图，约 ¥0.02/天）；072 给 Peter 发语音（`docs/tickets/072-voice-messages.md`，硅基流动 SenseVoiceSmall 免费识别）。先做 071，再做 072，各自一个 PR。
+
 核对 070 的 Windows 隔离 Git 回归、Cubic 和必需 CI。合并后请 Lan 验证更新器停在 main，再继续自主活动、长期任务与备份恢复的最小工单。
 
 ## Lan 的体验验收
