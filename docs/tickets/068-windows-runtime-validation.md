@@ -1,4 +1,4 @@
-# 工单 067｜Windows 真实运行验证与第四阶段启动
+# 工单 068｜Windows 真实运行验证与第四阶段启动
 
 ## 目标
 
@@ -6,7 +6,7 @@
 
 ## 当前状态
 
-基于 main `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。复用仓库现有 Electron smoke、Windows Node 测试、Python 离线回归和固定版本 Ombre 恢复门禁；未增加测试框架、付费服务或生产代码。
+基于 main `12fdb3586f91614cb38a0144344aebedda04d513`。复用仓库现有 Electron smoke、Windows Node 测试、Python 离线回归和固定版本 Ombre 恢复门禁；未增加测试框架、付费服务或生产代码。
 
 隔离虚构角色下，Windows 实际启动了 Python 网页服务、Ombre 子进程和固定版本文件系统 MCP。服务认证连接、退出、重启后记忆和工具能力重新就绪，虚构聊天文件在重启前后字节不变。实际 MCP 完成 Lab 内创建、读取、追加，并拒绝目录穿越。真实 Electron 窗口针对现有虚构 HTTP 服务通过 smoke；桌面 backend 也单独成功连接了实际 Python Agent 服务。
 

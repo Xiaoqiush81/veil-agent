@@ -4,19 +4,18 @@
 
 ## 当前目标与现状
 
-- **065 main 自动更新安全恢复：** PR #101 已合并至 main，merge commit `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。PR head `b0158c72c2fe0efd26c5173c6c6e22e18b56231a` 的 Tests #915 与 Dependency security #56 均成功；Cubic 的两项实质意见已修复并解决。旧 handoff 已过时，本次记录已纠正。
-- **067 Windows 真实运行验证：** 分支 `ticket/067-windows-runtime-validation`，PR #103，基于 main `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。使用全新虚构角色和独立数据目录；未访问或修改 Peter 的真实数据，没有模型请求或费用。合并前以 PR #103 最新提交的必要 CI、Cubic 与保护状态为准。
-- **开发端已验证：** Windows Node 24.22.0、npm 11.19.1 按现有 lockfile 安装 Electron 45.0.0。桌面 `npm test` 2 项通过；`npm run test:windows` 真实打开 Electron 窗口并通过历史显示、单次发送、拒绝审批、收起/重开、缩放和沙箱检查。项目 Python 离线回归 350 项通过、3 项按配置跳过；隔离 Ombre 子进程恢复门禁 1 项通过。
-- **真实 Windows 服务验证：** `web_launcher.py` 为虚构角色启动真实 Python 服务；桌面 backend 通过认证复用了该服务。启用本地 Ombre 和固定版本文件系统 MCP 后，服务重启仍报告两项能力就绪，虚构聊天文件 SHA-256 保持不变。Windows MCP 实际完成虚构 Lab 文件创建、读取、追加，并拒绝目录穿越。服务通过认证退出接口正常关闭。
-- **边界：** Electron 窗口 smoke 使用虚构 HTTP 服务；真实 Electron 窗口与真实 Python Agent 的合并链路尚未验收。未发送普通聊天消息，避免触发供应商请求。桌面端记忆入口仍为 Coming Soon。自主活动调度、长期运行、模型驱动工具调用及桌面备份/恢复未在真实窗口完成；内部假数据回归通过不替代这些场景。
-- 未复现阻断验证的产品故障，本次没有生产代码修复。第四阶段仍进行中，未启动第五阶段；Lan 真人验收未完成。
+- **067 能力变化通知可靠交付：** PR #102 已合并，merge commit `12fdb3586f91614cb38a0144344aebedda04d513`。head `83a8a091f77cf28ba03ebb512693fa067967c77e` 的 Tests #934 与 Dependency security #65 成功；Cubic 实质意见已处理。Windows 真人体验仍待验收。
+- **068 Windows 真实运行验证：** 分支 `ticket/068-windows-runtime-validation`，PR #104，基于 main `12fdb3586f91614cb38a0144344aebedda04d513`。使用虚构角色与隔离目录，未访问或修改 `data/peter`，未调用模型或付费服务。
+- **开发端已验证：** Windows Node 24.22.0、npm 11.19.1 按 lockfile 安装 Electron 45.0.0。`desktop/npm test` 2 项通过；`desktop/npm run test:windows` 真实打开 Electron 窗口并通过历史显示、单次发送、拒绝审批、收起/重开、缩放和沙箱检查。Python 离线回归 350 项通过、3 项跳过；隔离 Ombre 恢复门禁 1 项通过。
+- **真实 Windows 服务验证：** 虚构角色 Python 服务、Ombre 子进程及固定版本文件系统 MCP 实际启动；桌面 backend 认证复用成功。服务退出重启后记忆和文件能力重新就绪；MCP 对虚构 Lab 文件创建、读取、追加成功，并拒绝目录穿越。服务重启前后聊天文件字节一致。
+- **尚未验证：** Electron 窗口与真实 Python Agent 合并链路、模型回复、聊天内记忆写入/检索、模型驱动工具调用、自主活动调度、长期运行、桌面备份/恢复。未复现阻断产品故障，无生产代码修复。第四阶段仍进行中；不得启动第五阶段。
 
 ## 下一步
 
-核对 PR #103 最新提交的 Cubic 与必需 CI；合并后按下方步骤只用本机隔离虚构角色进行真人体验，再补足尚未覆盖的 Windows 场景。
+合并 PR #104 后，请 Lan 按下方三步在本机隔离虚构角色上验收；据验收结果继续补足未覆盖的 Windows 场景。
 
 ## Lan 的体验验收
 
-1. 在本机文件管理器打开 `E:\Peter-Agent\VEIL\veil-agent\.local-tmp\ticket-067-runtime\.local-tmp\`，先双击 `Start Fictional Agent.bat`，再双击 `Start Fictional Desktop.bat`。该目录是本次已准备好的隔离虚构角色；启动器只使用离线占位模型地址和 `data/runtime-fixture`，不访问 `data/peter`。确认桌面窗口显示虚构历史，输入 `/cost` 并看到本地账本结果。只输入 `/cost`、`/memory`、`/autonomy` 等本地命令，不输入普通聊天内容。
-2. 输入 `/memory`，确认记忆服务正常返回空列表；桌面 Memory / Ombre 入口显示不可用提示。
-3. 在 Agent 黑色控制台按 `Ctrl+C` 停止服务，再双击同一 Agent 启动器；在桌面形象上点右键，选择“重新连接聊天”。确认虚构历史仍在，`/cost` 没有重复记录。不要输入普通聊天内容，也不要关闭或修改真实 Peter 的服务和目录。
+1. 在本机文件管理器打开 `E:\Peter-Agent\VEIL\veil-agent\.local-tmp\ticket-067-runtime\.local-tmp\`，先双击 `Start Fictional Agent.bat`，再双击 `Start Fictional Desktop.bat`。这套本次已准备好的虚构角色仅使用离线占位模型地址和 `data/runtime-fixture`，不访问 `data/peter`。确认桌面窗口显示虚构历史，输入 `/cost` 查看本地账本；只输入 `/cost`、`/memory`、`/autonomy`，不要发普通聊天。
+2. 输入 `/memory` 和 `/autonomy`，确认本地状态可读取；桌面 Memory / Ombre 入口显示不可用提示。
+3. 在 Agent 控制台按 `Ctrl+C` 停止服务，再双击 Agent 启动器；在桌面形象上点右键，选“重新连接聊天”。确认虚构历史保留、账本无重复记录。不要操作真实 Peter 的服务或目录。
