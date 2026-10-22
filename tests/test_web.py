@@ -158,7 +158,7 @@ output_cny_per_million = "8"
         self.assertFalse((media_root / '.uploads' / first['filename']).exists())
 
     def test_invalid_replacement_does_not_clear_selected_photo_first(self):
-        page = (Path(__file__).resolve().parents[1] / 'web' / 'index.html').read_text()
+        page = (Path(__file__).resolve().parents[1] / 'web' / 'index.html').read_text(encoding='utf-8')
         choose = page[page.index('async function chooseImage'):page.index('imageButton.onclick')]
         self.assertGreater(choose.index('clearImage(false)'), choose.index('prepareImage(file)'))
 
@@ -240,7 +240,9 @@ output_cny_per_million = "8"
             {'type': 'text', 'text': 'fictional caption'},
             {'type': 'image_url', 'image_url': {'url': 'data:image/jpeg;base64,' + 'A' * 5_000_000}},
         ]}]
-        self.assertLess(estimate_request_tokens(messages), 2000)
+        estimated = estimate_request_tokens(messages)
+        self.assertGreaterEqual(estimated, 4096)
+        self.assertLess(estimated, 5000)
         collapse_latest_photo(messages)
         self.assertEqual(messages[0]['content'], '[Lan sent a photo]\nfictional caption')
 

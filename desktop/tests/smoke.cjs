@@ -39,7 +39,9 @@ const failSafe = setTimeout(() => { console.error('SMOKE timeout'); app.exit(1);
         memory_panel_url: 'http://127.0.0.1:1/dashboard' }));
     } else if (url.pathname === '/api/media') {
       let raw = ''; for await (const chunk of req) raw += chunk;
-      const body = JSON.parse(raw); assert.equal(body.mime, 'image/jpeg'); imageUploads++;
+      const body = JSON.parse(raw); assert.equal(body.mime, 'image/jpeg');
+      assert.equal(Buffer.from(body.data, 'base64').subarray(0, 3).equals(Buffer.from([0xFF, 0xD8, 0xFF])), true);
+      imageUploads++;
       res.statusCode = 201; res.end(JSON.stringify({ ok: true, media: { id: 'fictional-image', filename: 'fictional-image.png', mime: 'image/png', name: 'fictional.png' } }));
     } else if (url.pathname === '/api/send') {
       let raw = ''; for await (const chunk of req) raw += chunk;
@@ -98,6 +100,7 @@ const failSafe = setTimeout(() => { console.error('SMOKE timeout'); app.exit(1);
   await wait(() => approvals === 1, 'permission decision missing');
   await chat.webContents.executeJavaScript(`(() => { const input=document.querySelector('#image-file'); const bytes=Uint8Array.from(atob('${validPng.toString('base64')}'), c=>c.charCodeAt(0)); const file=new File([bytes], 'fictional.png', {type:'image/png'}); const dt=new DataTransfer(); dt.items.add(file); Object.defineProperty(input, 'files', {value:dt.files}); input.dispatchEvent(new Event('change')); })()`);
   await wait(() => chat.webContents.executeJavaScript('!document.querySelector("#image-preview").hidden'), 'image preview missing');
+  assert.equal(imageUploads, 0);
   await chat.webContents.executeJavaScript('document.querySelector("#send").click()');
   await wait(() => imageAttempts === 1, 'image retry was not exercised');
   await wait(() => chat.webContents.executeJavaScript('!document.querySelector("#image-preview").hidden'), 'image was not retained for retry');

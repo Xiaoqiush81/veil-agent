@@ -637,14 +637,13 @@ def history_keep(total, limit):
 
 
 def message_request_bytes(message):
-    # Vision providers charge a fixed image-token amount; counting the base64 bytes as text
-    # would reject every normal photo before it reaches the provider. Keep a conservative
-    # 2048-byte stand-in, which the 0.5 token floor below prices as 1024 input tokens.
+    # Do not count base64 as text. Reserve 4096 tokens per image: this is deliberately
+    # above the supported providers' resized-image charges and keeps preflight portable.
     sized = message
     content = message.get('content') if isinstance(message, dict) else None
     if isinstance(content, list):
         sized = {**message, 'content': [
-            ({**part, 'image_url': {'url': 'x' * 2048}}
+            ({**part, 'image_url': {'url': 'x' * 8192}}
              if isinstance(part, dict) and part.get('type') == 'image_url' else part)
             for part in content
         ]}

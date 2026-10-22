@@ -192,6 +192,9 @@ class Hub:
             replacement = index.with_suffix('.tmp')
             moved = False
             try:
+                import os
+                with source.open('rb') as image_handle:
+                    os.fsync(image_handle.fileno())
                 source.replace(target)
                 moved = True
                 data = (json.dumps(row, ensure_ascii=False) + '\n').encode('utf-8')
@@ -201,7 +204,6 @@ class Hub:
                     if handle.write(combined) != len(combined):
                         raise OSError('short media index write')
                     handle.flush()
-                    import os
                     os.fsync(handle.fileno())
                 replacement.replace(index)
             except OSError:
@@ -570,7 +572,8 @@ def serve_chat(chat, hub):
         chat.pending_capability_event = getattr(chat.tools, 'capability_event', None)
         chat.pending_capability_event_model = chat.pending_capability_event
     for message in chat.history_events:
-        media = message.get('media') or hub.media_for_request(message.get('request_id'))
+        media = message.get('media') or (hub.media_for_request(message.get('request_id'))
+                                         if message['role'] == 'user' else None)
         hub.push(message['role'], message['content'], time=message['time'], history=True,
                  **({'media': media} if media else {}))
     hub.autonomy = AutonomyController(chat, hub)
