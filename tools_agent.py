@@ -526,8 +526,7 @@ class FilesystemTools:
             self.capability_event = event
             self.capability_event_model = event
             return True
-        except Exception as exc:
-            self.photo_notice_error = str(exc)
+        except Exception:
             return False
 
     def _description(self, names):

@@ -21,13 +21,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from veil_agent import (ROOT, AUTONOMY_WAKE, ActivityState, Budget, Chat, Store, UserError,
+from veil_agent import (ROOT, AUTONOMY_WAKE, MAX_PHOTO_BYTES, ActivityState, Budget, Chat, Store, UserError,
                         load_character, now, make_model, run_chat)
 from autonomy import AutonomyController
 
 PAGE = Path(__file__).resolve().parent / 'web' / 'index.html'
 MAX_BODY = 200_000
-MAX_MEDIA_BYTES = 5 * 1024 * 1024
+MAX_MEDIA_BYTES = MAX_PHOTO_BYTES
 MAX_PENDING_MEDIA = 32
 PENDING_MEDIA_TTL = 60 * 60
 MAX_SUBMISSIONS = 1024
@@ -78,6 +78,7 @@ class Hub:
         self.answers = queue.Queue()
         self.pending = None       # event id of the approval being asked, else None
         self.submissions = OrderedDict()  # recent request ids -> normalized text digest
+        self.submission_pending = False  # admission reserved while media storage runs
         self.autonomy = None
         self.capability_record = lambda: None
         self.defer_outputs = False
@@ -288,7 +289,7 @@ class Hub:
             if self.autonomy is not None and self.autonomy.due():
                 with self.cond:
                     if (not self.stopping and not self.stopped and self.activity.enabled()
-                            and self.inbox.empty()):
+                            and self.inbox.empty() and not self.submission_pending):
                         self.autonomy_busy = True
                         self.busy = True
                         self.autonomy_interrupted.clear()
@@ -356,36 +357,43 @@ class Hub:
                 return 'duplicate' if self.submissions[request_id] == text_digest else 'conflict'
             if self.stopping or self.stopped:
                 return 'stopped'
+            if self.submission_pending:
+                return 'busy'
             if self.autonomy_busy:
                 if not self.inbox.empty():
                     return 'busy'
             elif self.busy:
                 return 'busy'
+            self.submission_pending = True
+        # Disk writes must not hold the event/approval condition. The reservation
+        # excludes concurrent submissions and new autonomy work until publication.
+        try:
             try:
                 media = self.commit_media(media_id, request_id, text_digest)
             except OSError:
                 return 'media_storage'
             if media_id is not None and not media:
                 return 'media'
-            def complete(committed):
-                self.finish_media_submission(committed, text, media, request_id)
-            if self.autonomy_busy:
+            with self.cond:
+                if self.stopping or self.stopped:
+                    return 'stopped'
+                def complete(committed):
+                    self.finish_media_submission(committed, text, media, request_id)
                 if not media:
                     self.push('user', text, request_id=request_id)
                 self.submissions[request_id] = text_digest
                 if len(self.submissions) > MAX_SUBMISSIONS:
                     self.submissions.popitem(last=False)
                 self.inbox.put((text, media, complete) if media else text)
-                self.autonomy_interrupted.set()
+                if self.autonomy_busy:
+                    self.autonomy_interrupted.set()
+                else:
+                    self.busy = True
                 return 'accepted'
-            self.busy = True
-            if not media:
-                self.push('user', text, request_id=request_id)
-            self.submissions[request_id] = text_digest
-            if len(self.submissions) > MAX_SUBMISSIONS:
-                self.submissions.popitem(last=False)
-            self.inbox.put((text, media, complete) if media else text)
-            return 'accepted'
+        finally:
+            with self.cond:
+                self.submission_pending = False
+                self.cond.notify_all()
 
     def approval(self, prompt):
         # Same sentence the terminal shows; the page offers two buttons for y/N.

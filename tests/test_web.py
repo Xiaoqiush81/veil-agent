@@ -15,7 +15,7 @@ from pathlib import Path
 from dataclasses import replace
 from unittest.mock import Mock, patch
 
-from veil_agent import (ActivityState, Budget, Chat, Store, collapse_latest_photo,
+from veil_agent import (ActivityState, Budget, Chat, Store, UserError, collapse_latest_photo,
                         estimate_request_tokens, load_character, run_chat)
 from web_agent import Hub, serve_chat, start_server
 from tools_agent import FilesystemTools
@@ -269,6 +269,74 @@ output_cny_per_million = "8"
         model_messages = self.model.call_args.args[0]
         self.assertFalse(any(item['content'].startswith('CURRENT CAPABILITIES') for item in model_messages))
         self.assertEqual(self.hub.snapshot(0)['current_capabilities'], chat.current_capability_snapshot())
+
+    def test_chat_append_failure_releases_photo_output_buffer_and_stops_service(self):
+        hub = self.hub
+        hub.busy = False
+        media = hub.save_media('image/png', b'\x89PNG\r\n\x1a\nfictional')
+        self.assertEqual(hub.submit('photo', 'failed-append', media['id']), 'accepted')
+        chat = Chat(self.cfg, self.store, Budget(self.store), self.model)
+        append = self.store.append
+        def fail_chat_row(path, row):
+            if path == chat.path:
+                hub.output('buffered diagnostic')
+                raise UserError('fictional disk failure')
+            return append(path, row)
+        with patch.object(self.store, 'append', side_effect=fail_chat_row):
+            with self.assertRaises(UserError):
+                serve_chat(chat, hub)
+        self.assertTrue(hub.stopping)
+        self.assertFalse(hub.defer_outputs)
+        self.assertEqual(hub.deferred_outputs, [])
+        self.assertFalse(any(e['kind'] == 'user' for e in hub.events))
+        self.assertTrue(any(e['text'] == 'buffered diagnostic' for e in hub.events))
+        self.model.assert_not_called()
+
+    def test_slow_media_commit_does_not_block_events_or_other_handlers(self):
+        hub = self.hub
+        hub.busy = False
+        media = hub.save_media('image/png', b'\x89PNG\r\n\x1a\nfictional')
+        entered, release = threading.Event(), threading.Event()
+        commit = hub.commit_media
+        results = []
+        def slow_commit(*args):
+            entered.set()
+            if not release.wait(5):
+                raise OSError('test timed out')
+            return commit(*args)
+        with patch.object(hub, 'commit_media', side_effect=slow_commit):
+            worker = threading.Thread(target=lambda: results.append(
+                hub.submit('photo', 'slow', media['id'])))
+            worker.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                self.assertTrue(hub.cond.acquire(timeout=1), 'storage held the event lock')
+                try:
+                    hub.push('notice', 'responsive')
+                    self.assertEqual(hub.submit('other', 'other'), 'busy')
+                    self.assertEqual(hub.submit('photo', 'slow', media['id']), 'busy')
+                    self.assertTrue(hub.inbox.empty())
+                finally:
+                    hub.cond.release()
+            finally:
+                release.set()
+                worker.join(5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(results, ['accepted'])
+        self.assertFalse(hub.submission_pending)
+        self.assertEqual(hub.submit('photo', 'slow', media['id']), 'duplicate')
+        self.assertEqual(hub.inbox.qsize(), 1)
+
+    def test_failed_media_commit_releases_admission_for_retry(self):
+        hub = self.hub
+        hub.busy = False
+        media = hub.save_media('image/png', b'\x89PNG\r\n\x1a\nfictional')
+        with patch.object(hub, 'commit_media', side_effect=OSError('fictional')):
+            self.assertEqual(hub.submit('photo', 'retry', media['id']), 'media_storage')
+        self.assertFalse(hub.submission_pending)
+        self.assertFalse(hub.busy)
+        self.assertNotIn('retry', hub.submissions)
+        self.assertEqual(hub.submit('photo', 'retry', media['id']), 'accepted')
 
     def test_submission_deduplication_window_is_bounded(self):
         hub = Hub('Test', ActivityState(self.store.root / 'test' / 'other-state.json'))

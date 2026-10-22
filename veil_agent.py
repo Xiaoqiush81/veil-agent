@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 MILLION = Decimal(1_000_000)
 PHOTO_PLACEHOLDER = '[Lan sent a photo]'
 PHOTO_MIME_TYPES = {'image/png', 'image/jpeg', 'image/gif', 'image/webp'}
+MAX_PHOTO_BYTES = 5 * 1024 * 1024
 
 RAW_DSML_TOOL_CALL = re.compile(r'<[|｜]DSML[|｜](?:tool_calls|function_calls|invoke)\b', re.IGNORECASE)
 CJK_TEXT = re.compile(r'[\u3400-\u9fff]')
@@ -975,13 +976,19 @@ class Chat:
             return text
         filename, mime = media.get('filename'), media.get('mime')
         if (not isinstance(filename, str) or Path(filename).name != filename
-                or mime not in PHOTO_MIME_TYPES):
+                or not isinstance(mime, str) or mime not in PHOTO_MIME_TYPES):
             raise UserError('图片记录无效，已停止；请保留 data 文件夹。')
         path = self.store.root / self.cfg.id / 'media' / filename
         try:
-            raw = path.read_bytes()
+            with path.open('rb') as handle:
+                if path.stat().st_size > MAX_PHOTO_BYTES:
+                    raise UserError('图片文件超过 5 MB，未发送。')
+                # Bound the read too: the file can grow after the size check.
+                raw = handle.read(MAX_PHOTO_BYTES + 1)
         except OSError as exc:
             raise UserError('图片文件无法读取，已停止；请保留 data 文件夹。') from exc
+        if len(raw) > MAX_PHOTO_BYTES:
+            raise UserError('图片文件超过 5 MB，未发送。')
         if not raw:
             raise UserError('图片文件为空，已停止；请保留 data 文件夹。')
         caption = text if text != '[图片]' else 'What do you see in this photo?'
@@ -1601,23 +1608,22 @@ def run_chat(chat, input_fn=input, output=print, drop=drop_typeahead, activity=N
                 # Storage and accounting errors stop the session rather than
                 # permitting a subsequent request on uncertain local state.
                 try:
-                    reply = chat.send(text, extra_context=pending_deletion_context(chat), media=media)
+                    chat.last_send_persisted = False
+                    try:
+                        reply = chat.send(text, extra_context=pending_deletion_context(chat), media=media)
+                    finally:
+                        # Every exit (including storage errors and interrupts)
+                        # releases the adapter's transaction exactly once.
+                        complete = getattr(raw_text, 'complete', None)
+                        if callable(complete):
+                            complete(chat.last_send_persisted)
                 except TooLong as exc:
-                    complete = getattr(raw_text, 'complete', None)
-                    if callable(complete):
-                        complete(bool(getattr(chat, 'last_send_persisted', False)))
                     output(str(exc))
                     continue
                 except RequestFailed as exc:
-                    complete = getattr(raw_text, 'complete', None)
-                    if callable(complete):
-                        complete(True)
                     output(str(exc))
                     notify_dropped()
                     continue
-                complete = getattr(raw_text, 'complete', None)
-                if callable(complete):
-                    complete(True)
                 if chat.trim_note:
                     output(chat.trim_note)
                 if not chat.reply_displayed:
