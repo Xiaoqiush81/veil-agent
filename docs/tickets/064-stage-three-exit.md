@@ -10,7 +10,7 @@ PR #99 已合并为 `d4641390f3fa8df0b97697d18ac601a14086d8b0`；其最终 head 
 
 GitHub Rulesets API 显示 `VEIL Main Protection`（ID `25620335`）处于 active，目标为默认分支，要求 PR、严格同步最新分支和六项检查；同时禁止删除与非快进更新，未配置绕过主体。#99 在该 Ruleset 建立前已合并，不能单独证明保护的运行期拦截。
 
-PR #100 的隔离 head `16dc2ac85d176ada9008aad7918cdd77e11cac69` 加入一次性虚构失败探针：Tests #901 的 `offline-chat (ubuntu-latest, 3.11)` 失败，`offline-chat (windows-latest, 3.11)` 被取消，另两项当时未完成；Dependency security #50 成功。GitHub 同时报告 `mergeable_state: unstable`，证明失败、取消或未完成的必需检查没有放行。探针随后删除；最新提交只保留文档，需由六项必需检查与 Cubic 重新核验后才合并。
+PR #100 分三步取得独立运行证据：head `16dc2ac85d176ada9008aad7918cdd77e11cac69` 的虚构探针让 Ubuntu 3.11 必需检查失败，GitHub 报告 `mergeable_state: unstable`；删除探针后的 head `0b2808f62567b3b81891a730cd7415cb90c1bd41` 六项检查全部成功，GitHub 恢复 `mergeable_state: clean`；head `f56bbf43cdbbe140594be4312efa7e906bd94906` 临时省略两个 3.12 context，其余四项实际检查全部成功，GitHub 仍报告 `mergeable_state: unstable`。因此失败、缺项与修复后放行均已分别证明。两个探针均已撤销，最终变更不修改工作流、测试或生产代码。
 
 ## 验收步骤
 
