@@ -1,5 +1,6 @@
 # 交接
 
+- 071（发图片）、072（发语音）工单已在 main：Lan 要能感受到的新功能，优先于加固类工单。图片直接用 Peter 当前模型看（不另接描述模型）；语音识别复用 `EMBED_API_KEY` 的硅基流动 key。参考实现在 Lan 的旧项目 `yecays-ai/veil`。073 Peter 说语音用 Lan 在 MiniMax 克隆好的音色（与小手机同一套 key/voice_id/区域，放本地 .env），费用 Lan 已同意。
 - 2026-10-22 Claude：PR #105（068 能力认知）与 PR #104（068 Windows 运行验证）已合并，main `becf0e5`。两个 PR 都编号 068 是并行工单撞号；下一个新工单从 070 起，开工前先查 main 和打开的 PR 里已用的编号。
 - PR #108（fork）指出 #104 的验收步骤依赖开发端忽略目录 `.local-tmp/ticket-067-runtime`，Lan 的仓库里没有。本次已把 STATUS 和 `docs/tickets/068-windows-runtime-validation.md` 的验收改为现有 Peter 正常入口；#108 本身因整段覆盖 STATUS/HANDOFF 会丢掉 #105 的内容，未合并。
 - 本次同时把 STATUS/HANDOFF 里多轮合并叠出来的过期段落（“PR 仍在审”“下一步合并 #10x”等）清掉，只保留当前事实。各 PR 的详细过程见对应 PR 正文和 `docs/tickets/`。
