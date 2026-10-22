@@ -29,6 +29,7 @@ PAGE = Path(__file__).resolve().parent / 'web' / 'index.html'
 MAX_BODY = 200_000
 MAX_MEDIA_BYTES = 5 * 1024 * 1024
 MAX_PENDING_MEDIA = 32
+PENDING_MEDIA_TTL = 60 * 60
 MAX_SUBMISSIONS = 1024
 MEDIA_ID_PATTERN = re.compile(r'^[0-9a-f]{32}$')
 MEDIA_TYPES = {
@@ -85,6 +86,7 @@ class Hub:
         self.media_root = Path(media_root) if media_root else None
         self.media_index = {}
         self.pending_media = OrderedDict()
+        self.pending_media_times = {}
         self.media_lock = threading.RLock()
         if self.media_root:
             self.media_root.mkdir(parents=True, exist_ok=True)
@@ -151,6 +153,14 @@ class Hub:
         row = {'id': media_id, 'filename': filename, 'mime': mime,
                'name': Path(original_name).name[:120] or 'image'}
         with self.media_lock:
+            cutoff = time.monotonic() - PENDING_MEDIA_TTL
+            expired = [media_id for media_id, created in self.pending_media_times.items()
+                       if created <= cutoff]
+            for expired_id in expired:
+                expired_row = self.pending_media.pop(expired_id, None)
+                self.pending_media_times.pop(expired_id, None)
+                if expired_row:
+                    (self.upload_root / expired_row['filename']).unlink(missing_ok=True)
             if len(self.pending_media) >= MAX_PENDING_MEDIA:
                 return None
             pending_path = self.upload_root / filename
@@ -160,6 +170,7 @@ class Hub:
                 pending_path.unlink(missing_ok=True)
                 raise
             self.pending_media[media_id] = row
+            self.pending_media_times[media_id] = time.monotonic()
         return dict(row)
 
     def commit_media(self, media_id, request_id, submission_digest):
@@ -205,6 +216,7 @@ class Hub:
                         pass
                 raise
             self.pending_media.pop(media_id, None)
+            self.pending_media_times.pop(media_id, None)
             self.media_index[media_id] = row
             return dict(row)
 

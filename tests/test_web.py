@@ -135,6 +135,33 @@ output_cny_per_million = "8"
         self.assertEqual(reopened.media_for_request('test-request-1')['id'], media['id'])
         self.assertEqual(reopened.submit('[图片]', 'test-request-1', media['id']), 'duplicate')
 
+        # Losing an old photo must degrade that turn to a placeholder instead
+        # of making the entire conversation impossible to reopen.
+        (self.store.root / 'test' / 'media' / media['filename']).unlink()
+        degraded = Chat(self.cfg, self.store, Budget(self.store), self.model)
+        degraded_user = next(row for row in reversed(degraded.history) if row['role'] == 'user')
+        self.assertEqual(degraded_user['content'], '[Lan sent a photo]')
+
+    def test_expired_pending_upload_is_reclaimed_before_capacity_check(self):
+        media_root = self.store.root / 'test' / 'expiring-media'
+        hub = Hub('Test', ActivityState(self.store.root / 'test' / 'expiring-state.json'),
+                  media_root=media_root)
+        png = b'\x89PNG\r\n\x1a\nfictional'
+        with patch('web_agent.MAX_PENDING_MEDIA', 1), patch('web_agent.time.monotonic') as clock:
+            clock.return_value = 10
+            first = hub.save_media('image/png', png, 'first.png')
+            self.assertIsNotNone(first)
+            clock.return_value = 10 + 60 * 60 + 1
+            second = hub.save_media('image/png', png, 'second.png')
+        self.assertIsNotNone(second)
+        self.assertIsNone(hub.pending_media_info(first['id']))
+        self.assertFalse((media_root / '.uploads' / first['filename']).exists())
+
+    def test_invalid_replacement_does_not_clear_selected_photo_first(self):
+        page = (Path(__file__).resolve().parents[1] / 'web' / 'index.html').read_text()
+        choose = page[page.index('async function chooseImage'):page.index('imageButton.onclick')]
+        self.assertGreater(choose.index('clearImage(false)'), choose.index('prepareImage(file)'))
+
     def test_image_request_rejects_bad_metadata_and_commands(self):
         self.hub.busy = False
         png = base64.b64encode(b'\x89PNG\r\n\x1a\nfictional').decode()

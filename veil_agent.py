@@ -958,8 +958,16 @@ class Chat:
         for index, message in enumerate(self.history_events):
             content = message['content']
             if message['role'] == 'user' and isinstance(message.get('media'), dict):
-                content = (self._photo_content(content, message['media']) if index == latest_photo else
-                           PHOTO_PLACEHOLDER + (('\n' + content) if content != '[图片]' else ''))
+                fallback = PHOTO_PLACEHOLDER + (('\n' + content) if content != '[图片]' else '')
+                if index == latest_photo:
+                    try:
+                        content = self._photo_content(content, message['media'])
+                    except UserError:
+                        # A missing historical file must not make the whole
+                        # conversation (including text-only turns) unusable.
+                        content = fallback
+                else:
+                    content = fallback
             model_history.append({'role': message['role'], 'content': content})
         return model_history, sum(any(m['role'] == 'assistant' for m in g) for g in groups)
 
