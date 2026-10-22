@@ -194,9 +194,10 @@ persistent_append_file = "growth-journal.md"
         self.assertEqual(target.read_bytes(), b'existing destination')
 
         target.unlink()
+        atomic_rename = _rename_noreplace
         def create_racing_destination(src, dst, *args, **kwargs):
             Path(dst).write_bytes(b'racing destination')
-            raise FileExistsError(dst)
+            return atomic_rename(src, dst)
         with patch('tools_agent._rename_noreplace', side_effect=create_racing_destination):
             result = self.move('lab/play.md', 'lab/archive/play.md')
         self.assertEqual(result[1], '被拒绝', result)
