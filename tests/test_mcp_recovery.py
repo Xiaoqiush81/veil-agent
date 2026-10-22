@@ -79,9 +79,21 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('hold', {'content': 'fictional'})
         self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(failed.exception.stage, 'mcp_tool')
         self.assertEqual(client.calls, ['hold'])
         self.assertEqual(recovered, ['verified'])
         self.assertEqual(client.call('pulse', {}), 'later read')
+
+    def test_tool_execution_failure_keeps_a_safe_stage_after_unknown_result(self):
+        client = self.backend([ConnectionError('fixture secret')])
+        diagnostics = []
+        client.diagnostic = diagnostics.append
+        with self.assertRaises(MemoryToolError) as failed:
+            client.call('breath_search', {'query': 'fictional'})
+        self.assertEqual((failed.exception.code, failed.exception.stage), ('unknown', 'mcp_tool'))
+        self.assertEqual(diagnostics[0]['stage'], 'mcp_tool')
+        self.assertIn('ConnectionError', diagnostics[0]['error_types'])
+        self.assertNotIn('fixture secret', json.dumps(diagnostics))
 
     def test_concurrent_transport_failures_share_one_recovery_owner(self):
         recovered = []
@@ -101,9 +113,12 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('hold', {'content': 'fictional'})
         self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(failed.exception.stage, 'recovery')
         self.assertEqual(client.calls, ['hold'])
         self.assertNotIn('fixture-secret', json.dumps(diagnostics))
         self.assertEqual(client.recovery_count, 1)
+        recovery = next(row for row in diagnostics if row['code'] == 'recovery_failed')
+        self.assertEqual(recovery['stage'], 'recovery')
 
     def test_runtime_recovery_stops_after_two_failed_attempts(self):
         attempts = []
@@ -134,6 +149,7 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('pulse', {})
         self.assertEqual(failed.exception.code, 'tool')
+        self.assertEqual(failed.exception.stage, 'mcp_tool')
         self.assertNotIn('private', str(failed.exception))
         self.assertEqual(client.calls, ['pulse'])
 
