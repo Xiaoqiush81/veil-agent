@@ -120,17 +120,27 @@ class LongTaskStore:
             return False
         if value['pending_action'] is not None:
             pending = value['pending_action']
+            effect = pending.get('expected_effect') if isinstance(pending, dict) else None
+            if effect is not None:
+                incomplete_move_effect = (
+                    pending.get('tool') == 'move_lab_file'
+                    and isinstance(effect, dict)
+                    and effect.get('kind') == 'exact'
+                    and effect.get('sha256') is None
+                    and effect.get('byte_length') is None)
+                valid_effect = (
+                    isinstance(effect, dict)
+                    and effect.get('kind') in ('exact', 'suffix', 'memory_body')
+                    and isinstance(effect.get('sha256'), str)
+                    and type(effect.get('byte_length')) is int
+                    and effect['byte_length'] >= 0)
+                if not (valid_effect or incomplete_move_effect):
+                    return False
             if (not isinstance(pending, dict)
                     or not all(isinstance(pending.get(key), str)
                                for key in ('started_at', 'tool', 'target'))
                     or ('operation_id' in pending and not isinstance(pending['operation_id'], str))
                     or ('normalized_target' in pending and not isinstance(pending['normalized_target'], str))
-                    or ('expected_effect' in pending and pending['expected_effect'] is not None and
-                        (not isinstance(pending['expected_effect'], dict) or
-                         pending['expected_effect'].get('kind') not in ('exact', 'suffix', 'memory_body') or
-                         not isinstance(pending['expected_effect'].get('sha256'), str) or
-                         type(pending['expected_effect'].get('byte_length')) is not int or
-                         pending['expected_effect']['byte_length'] < 0))
                     or ('verified_by' in pending and not isinstance(pending['verified_by'], str))
                     or ('verified_sha256' in pending and not isinstance(pending['verified_sha256'], str))
                     or ('state' in pending and not isinstance(pending['state'], str))
@@ -394,7 +404,7 @@ class LongTaskStore:
                 return None, False
             task['pending_action'] = {'operation_id': uuid.uuid4().hex, 'started_at': now(),
                 'tool': name, 'target': str(target)[:240], 'normalized_target': self._normalized_target(target),
-                'expected_effect': self._expected_effect(name, args)}
+                'expected_effect': self._expected_effect(name, args), 'verified_in_step': None}
             task['updated_at'] = now()
             self._save(task)
             return None, True

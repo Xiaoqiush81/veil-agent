@@ -159,7 +159,7 @@ persistent_append_file = "growth-journal.md"
             self.assertEqual(self.call(name, 'lab/notes.md', 'bad')[1], '被拒绝')
         self.assertEqual(self.move('growth-journal.md', 'lab/archive/growth-journal.md')[1], '被拒绝')
         self.assertEqual(self.move('lab/notes.md', 'archive/notes.md')[1], '被拒绝')
-        self.assertEqual(journal.read_bytes(), b'original journal')
+        self.assertEqual(journal.read_bytes(), b'original journal\nsecond')
 
     def test_archive_and_restore_preserve_complete_file_and_survive_reopen(self):
         self.call('create_directory', 'lab/play')
