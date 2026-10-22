@@ -5,7 +5,7 @@ description: 开一张新工单并做到合并：写工单、开分支、实现�
 
 # 工单流程
 
-0. **开工**：拉取最新 `main`，读 `STATUS.md`、`HANDOFF.md`，用两句话向 lan 复述当前目标和你要做什么（`AGENTS.md`“开工和收工”）。
+0. **开工**：拉取最新 `main`，读 `STATUS.md`、`HANDOFF.md`，核对上一张相关工单的 GitHub PR 状态、合并提交、最新 CI 和实际交付；若已合并但 `STATUS.md` 仍显示施工中，在本 PR 中纠正。分别记录合并、自动检查、Windows 体验验收。用两句话向 lan 复述当前目标和你要做什么（`AGENTS.md`“开工和收工”）。
 1. **过三问**（`AGENTS.md`）。任何一问答不上来，停下，告诉 lan 原因。
 2. **先查复用**：按 `reuse-first` skill 查有没有成熟实现。
 3. **写工单** `docs/tickets/<编号>-<短名>.md`，编号接着最大的往下排。只写三段：
@@ -16,9 +16,9 @@ description: 开一张新工单并做到合并：写工单、开分支、实现�
 4. **开分支**：从最新 `main` 开 `ticket/<编号>-<英文短名>`。一张工单只用这一个分支。
 5. **实现**：只做工单里写的。测试用假模型、假数据。提交前跑测试。
 6. **开 PR**：用 PR 模板，标题说清楚改了什么；把 `STATUS.md` 的“现状/下一步/验收”改成这张工单进行中的样子，一起提交。
-7. **处理评审**：按 `pr-review` skill。
-8. **合并**：小兔子评审完成、CI 通过、该修的修完，agent 用 GitHub 合并，不等 lan。小兔子没审完一律不合。不直接推 `main`。
+7. **处理评审**：按 `pr-review` skill 请求并处理 Cubic 审查；只修功能、用户使用、数据完整性、隐私和安全方面的实质问题。Cubic 的评论或 `COMMENTED` review 不自动成为 GitHub required status check。
+8. **合并**：Cubic 审查完成、当前 PR 最新提交的必需 CI 通过、该修的实质问题已处理，并满足 GitHub 实际分支保护后，agent 用 GitHub 合并，不等 lan。不得把评论当成 required check，不得绕过保护或直接推 `main`。
 9. **请 lan 验收**：合并后告诉她验收步骤。她发现问题就开新工单修；没通过就是没完成。同一个问题修两次还坏，停下报告。
-10. **收尾**：按 `handoff` skill 更新 `STATUS.md`（每个 PR 必须）和 `HANDOFF.md`（窗口结束或换人时）。没更新 `STATUS.md` 的 PR 不算完成。
+10. **收尾**：按 `handoff` skill 更新 `STATUS.md`（每个 PR 必须）和 `HANDOFF.md`（窗口结束或换人时），记录检查和体验证据。没更新 `STATUS.md` 的 PR 不算完成。
 
 做了一个小时还没完：判断要不要继续，然后告诉 lan。
