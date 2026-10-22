@@ -18,6 +18,22 @@
 1. **067 待验收：** 给 Peter 增加 `lab_file_digest` 与 `move_lab_file`，确认面板和 Peter 收到同一完整英文更新，之后多轮不重复。
 2. **068 施工中：** 打开能力面板确认当前真实能力和权限；问 Peter “What tools can you use right now, and what are their limits?”，确认回答无需搜索文件且与面板一致。
 3. **069 待验收：** 正常连续与 Peter 聊天并询问已记住的事项，确认不会再出现不含阶段的检索失败；若出现检索故障，保留角色私有诊断供 agent 判断，勿发送聊天或记忆正文。
+
+- **067 能力变化通知可靠交付：** PR #102 已合入 main；对应提交 `12fdb3586f91614cb38a0144344aebedda04d513`。head `83a8a091f77cf28ba03ebb512693fa067967c77e` 的 Tests #934 与 Dependency security #65 成功；Cubic 实质意见已处理。Windows 真人体验仍待验收。
+- **068 Windows 真实运行验证：** 分支 `ticket/068-windows-runtime-validation`，PR #104，基于 main `12fdb3586f91614cb38a0144344aebedda04d513`。使用虚构角色与隔离目录，未访问或修改 `data/peter`，未调用模型或付费服务。
+- **开发端已验证：** Windows Node 24.22.0、npm 11.19.1 按 lockfile 安装 Electron 45.0.0。`desktop/npm test` 2 项通过；`desktop/npm run test:windows` 真实打开 Electron 窗口并通过历史显示、单次发送、拒绝审批、收起/重开、缩放和沙箱检查。Python 离线回归 350 项通过、3 项跳过；隔离 Ombre 恢复门禁 1 项通过。
+- **真实 Windows 服务验证：** 虚构角色 Python 服务、Ombre 子进程及固定版本文件系统 MCP 实际启动；桌面 backend 认证复用成功。服务退出重启后记忆和文件能力重新就绪；MCP 对虚构 Lab 文件创建、读取、追加成功，并拒绝目录穿越。服务重启前后聊天文件字节一致。
+- **尚未验证：** Electron 窗口与真实 Python Agent 合并链路、模型回复、聊天内记忆写入/检索、模型驱动工具调用、自主活动调度、长期运行、桌面备份/恢复。未复现阻断产品故障，无生产代码修复。第四阶段仍进行中；不得启动第五阶段。
+
+### 068 Windows 运行验证：下一步
+
+合并 PR #104 后，请 Lan 按下方三步在本机隔离虚构角色上验收；据验收结果继续补足未覆盖的 Windows 场景。
+
+### 068 Windows 运行验证：Lan 的体验验收
+
+1. 从仓库根目录打开 `.local-tmp/ticket-067-runtime/.local-tmp/`，先双击 `Start Fictional Agent.bat`，再双击 `Start Fictional Desktop.bat`。该虚构角色及数据已由开发端预先准备在 `.local-tmp/ticket-067-runtime`，只使用离线占位模型地址和 `data/runtime-fixture`。桌面形象出现后先右键选择“更换 Agent 文件夹”，在文件选择框中选 `.local-tmp/ticket-067-runtime`（其中有 `start-web.bat` 和虚构角色配置）；确认后再点击形象打开聊天。若该隔离目录不存在，停止验收，不要选择 Peter 的目录。确认虚构历史显示，输入 `/cost`、`/memory`、`/autonomy` 查看本地状态，不要发普通聊天。
+2. 输入 `/memory` 和 `/autonomy`，确认本地状态可读取；桌面 Memory / Ombre 入口显示不可用提示。
+3. 在 Agent 控制台按 `Ctrl+C` 停止服务，再双击 Agent 启动器；在桌面形象上点右键，选“重新连接聊天”。确认虚构历史保留、账本无重复记录。不要操作真实 Peter 的服务或目录。
 - **PR #106 / 069 失败阶段诊断：** PR #106 已合并到 main，提交 `c45504c11e4b74f9803506741c4fd9db1b8dc34b`；GitHub Tests 和 Dependency security 通过。真实 Windows 聊天验收仍未完成。
 - **069 Ombre 重启后的检索失败：** 安全诊断序列确认了故障路径：`breath_search` 连接被拒（`ConnectError`），Ombre 重启成功，但原调用仍以 `unknown` 失败。原因已定位到恢复后没有重发这次确定未送达的调用。
 - **PR #107 修复范围：** 只在连接被拒且 Ombre 重启经验证成功时补发一次；异常组内所有原因都必须证明未送达。任何可能已到达服务的调用不重放；补发失败保持 `unknown`，写入结果不明保护不变。健康响应清零连续恢复计数，累计恢复次数保留。
