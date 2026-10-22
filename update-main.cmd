@@ -87,6 +87,18 @@ if errorlevel 1 (
 
 :backup_ready
 echo Saved the old local main as %BACKUP_BRANCH%.
+set "COLLISION_FILE=%TEMP%\veil-update-collisions-%RANDOM%-%RANDOM%.tmp"
+for /f "delims=" %%I in ('git ls-files --others --ignored --exclude-standard') do (
+    git cat-file -e "origin/main:%%I" 2>nul
+    if not errorlevel 1 echo %%I>>"%COLLISION_FILE%"
+)
+if exist "%COLLISION_FILE%" (
+    echo Update stopped because GitHub now tracks these ignored local files:
+    type "%COLLISION_FILE%"
+    del "%COLLISION_FILE%" >nul 2>&1
+    echo Move or rename them, then run the updater again. No local file was overwritten.
+    goto return_to_branch
+)
 git reset --hard origin/main
 if errorlevel 1 (
     echo Could not align main with GitHub. The recovery branch is preserved.

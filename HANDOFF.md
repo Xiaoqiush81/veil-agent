@@ -1,7 +1,7 @@
 # 交接
 
 - 2026-10-22 Codex：工单 065，分支 `ticket/065-safe-main-auto-update`，基于 main `d464139`。本次自动更新失败的直接原因是本地 `main` 在 14:23 被 `git pull --ff-only origin ticket/062-memory-write-reconciliation` 误推进到 `6045e0a`，而远端已通过 squash 历史继续前进；旧更新器只能快进，因此必然失败。
-- 已把异常旧指针保存在本地分支 `backup-main-before-update-20261022-1430`，再将本地 `main` 对齐 `origin/main`；3 个提交没有删除。`update-main.cmd` 现在快进失败时会先创建 `backup/main-before-update-<旧 SHA>`，成功后返回原工单分支。隔离 Windows Git 仓库回归先复现旧脚本返回 1，修复后通过。
+- 已把异常旧指针保存在本地分支 `backup-main-before-update-20261022-1430`，再将本地 `main` 对齐 `origin/main`；3 个提交没有删除。`update-main.cmd` 现在快进失败时会先创建 `backup/main-before-update-<旧 SHA>`，并在 reset 前阻止远端 tracked 路径覆盖 ignored 本地文件，成功后返回原工单分支。隔离 Windows Git 仓库回归先复现旧脚本返回 1，现覆盖碰撞阻断、恢复更新和连续第二次运行。
 - PR #101 已开放。PR #99 已合并至 main `d464139`；PR #100（064）仍开放，GitHub 当前 head `f56bbf4`，065 不改动其门禁核验内容。下一个窗口第一步：核对 #101 最新提交的 CI/Cubic 并完成合并，然后请 Lan 双击更新器两次验收。
 
 - 2026-10-22 Codex：工单 063，分支 `ticket/063-github-quality-gates`，基于最新 main `8f59d04dadf7bf6f99000e85c46fb7dbf4db5cd4`。本地已建立分支，保留了原有未跟踪 `.worktrees/` 内容。
