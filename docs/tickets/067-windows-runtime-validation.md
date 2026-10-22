@@ -16,6 +16,6 @@
 
 ## 验收步骤
 
-1. 在已准备的隔离虚构角色目录启动 Agent 和桌面形象，确认虚构历史显示；输入 `/cost`，确认本地账本可读。
+1. 在本机文件管理器打开 `E:\Peter-Agent\VEIL\veil-agent\.local-tmp\ticket-067-runtime\.local-tmp\`，先双击 `Start Fictional Agent.bat`，再双击 `Start Fictional Desktop.bat`。该目录是本次已准备好的隔离虚构角色；启动器只使用离线占位模型地址和 `data/runtime-fixture`，不访问 `data/peter`。确认虚构历史显示；输入 `/cost`，确认本地账本可读。
 2. 输入 `/memory` 和 `/autonomy`，确认服务返回当前状态；桌面 Memory / Ombre 入口继续显示不可用。
-3. 正常退出 Agent 后重新启动，从桌面菜单选择“重新连接聊天”；确认历史保留、命令没有重复写入。不要输入普通聊天内容或使用 Peter 的真实目录。
+3. 在 Agent 黑色控制台按 `Ctrl+C` 停止服务，再双击同一 Agent 启动器；在桌面形象上点右键，选择“重新连接聊天”。确认历史保留、命令没有重复写入。不要输入普通聊天内容，也不要关闭或修改真实 Peter 的服务和目录。

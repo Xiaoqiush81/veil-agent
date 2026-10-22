@@ -17,6 +17,6 @@
 
 ## Lan 的体验验收
 
-1. 双击本机隔离目录里的“Start Fictional Agent.bat”，再双击“Start Fictional Desktop.bat”；确认窗口显示虚构历史，发送 `/cost` 并看到本地账本结果。只输入 `/cost`、`/memory`、`/autonomy` 等本地命令，不输入普通聊天内容。
+1. 在本机文件管理器打开 `E:\Peter-Agent\VEIL\veil-agent\.local-tmp\ticket-067-runtime\.local-tmp\`，先双击 `Start Fictional Agent.bat`，再双击 `Start Fictional Desktop.bat`。该目录是本次已准备好的隔离虚构角色；启动器只使用离线占位模型地址和 `data/runtime-fixture`，不访问 `data/peter`。确认桌面窗口显示虚构历史，输入 `/cost` 并看到本地账本结果。只输入 `/cost`、`/memory`、`/autonomy` 等本地命令，不输入普通聊天内容。
 2. 输入 `/memory`，确认记忆服务正常返回空列表；桌面 Memory / Ombre 入口显示不可用提示。
-3. 通过聊天已有的“退出服务”正常关闭 Agent，再双击隔离 Agent 启动器，并从桌面菜单选择“重新连接聊天”；确认虚构历史仍在且 `/cost` 没有重复记录。
+3. 在 Agent 黑色控制台按 `Ctrl+C` 停止服务，再双击同一 Agent 启动器；在桌面形象上点右键，选择“重新连接聊天”。确认虚构历史仍在，`/cost` 没有重复记录。不要输入普通聊天内容，也不要关闭或修改真实 Peter 的服务和目录。
