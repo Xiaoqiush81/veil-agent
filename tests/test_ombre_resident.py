@@ -1,4 +1,5 @@
 import json
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 import tempfile
 import unittest
@@ -6,7 +7,8 @@ from types import SimpleNamespace
 
 from ombre_entry import RestrictedHTTPApp
 from ombre_host import acquire, release
-from ombre_resident import PINNED_OMBRE, _copy_first_backup, _environment, resident_config
+from ombre_resident import (PINNED_OMBRE, ResidentError, _copy_first_backup,
+                            _environment, resident_config, start_or_connect)
 from veil_agent import UserError, load_character
 from web_agent import Hub
 
@@ -95,6 +97,43 @@ class OmbreResidentTests(unittest.TestCase):
                             acquire(second)
                 finally:
                     release(first)
+
+    def test_healthy_but_unowned_port_is_rejected_without_config_or_process_takeover(self):
+        class HealthOnly(BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"status":"ok"}')
+
+            def log_message(self, *_args):
+                pass
+
+        server = HTTPServer(('127.0.0.1', 0), HealthOnly)
+        import threading
+        worker = threading.Thread(target=server.serve_forever, daemon=True)
+        worker.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                installed = root / '.deps' / 'ombre' / 'installed'
+                installed.parent.mkdir(parents=True)
+                installed.write_text(PINNED_OMBRE, encoding='ascii')
+                cfg = SimpleNamespace(id='fixture', name='Fixture',
+                    memory={'ombre_port': server.server_port, 'ombre_model': False},
+                    provider={'model': 'offline', 'base_url': 'https://offline.invalid/v1',
+                              'api_key_env': 'UNUSED'},)
+                with self.assertRaises(ResidentError) as failed:
+                    start_or_connect(root, cfg, data_root=root / 'isolated-data',
+                        api_key_overrides={'OMBRE_EMBED_API_KEY': '',
+                                           'OMBRE_COMPRESS_API_KEY': ''})
+                self.assertEqual(failed.exception.stage, 'port_identity')
+                self.assertFalse((root / 'isolated-data' / 'fixture' / 'memory' /
+                                  '_agent' / 'config.yaml').exists())
+                self.assertTrue(server.socket.fileno() >= 0)
+        finally:
+            server.shutdown()
+            server.server_close()
+            worker.join(timeout=2)
 
     def test_role_port_is_loaded_and_range_checked(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import socket
 import subprocess
 import time
 from urllib.error import URLError
@@ -12,6 +13,13 @@ from urllib.request import urlopen
 
 PINNED_OMBRE = '115d831d979bf67efc7150f976e2cb34c333c935'
 STARTUP_WAIT = 90
+MCP_PROBE_WAIT = 15
+
+
+class ResidentError(RuntimeError):
+    def __init__(self, stage):
+        self.stage = stage
+        super().__init__(stage)
 
 
 def resident_config(cfg, vault, token):
@@ -28,7 +36,8 @@ def resident_config(cfg, vault, token):
         'dehydration': ({'model': cfg.provider['model'], 'base_url': cfg.provider['base_url'],
                          'api_key': '', 'max_tokens': 1024, 'temperature': 0.1,
                          'timeout_seconds': 30} if settings.get('ombre_model', True) else {'api_key': ''}),
-        'embedding': {'enabled': True, 'background_indexing': False,
+        'embedding': {'enabled': bool(settings.get('embedding_enabled', True)),
+                      'background_indexing': False,
                       'backend': 'api', 'model': settings['model'],
                       'base_url': settings['base_url'], 'dim': int(settings.get('dimensions', 1024)),
                       'timeout_seconds': 20},
@@ -75,15 +84,123 @@ def _health(port):
         return False
 
 
+def _port_open(port):
+    try:
+        with socket.create_connection(('127.0.0.1', port), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def _pid_alive(pid):
+    if os.name == 'nt':
+        import ctypes
+        try:
+            process_id = int(pid)
+            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel32.OpenProcess.argtypes = (ctypes.c_ulong, ctypes.c_int, ctypes.c_ulong)
+            kernel32.OpenProcess.restype = ctypes.c_void_p
+            kernel32.CloseHandle.argtypes = (ctypes.c_void_p,)
+            kernel32.GetExitCodeProcess.argtypes = (ctypes.c_void_p,
+                                                    ctypes.POINTER(ctypes.c_ulong))
+            kernel32.GetExitCodeProcess.restype = ctypes.c_int
+            handle = kernel32.OpenProcess(0x1000, 0, process_id)  # QUERY_LIMITED_INFORMATION
+            if handle:
+                code = ctypes.c_ulong()
+                try:
+                    return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                                and code.value == 259)  # STILL_ACTIVE
+                finally:
+                    kernel32.CloseHandle(handle)
+            return False
+        except (OSError, TypeError, ValueError):
+            return False
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _lock_held(path):
+    try:
+        handle = Path(path).open('a+b')
+    except OSError:
+        return False
+    with handle:
+        try:
+            from ombre_host import acquire, release
+            acquire(handle)
+        except OSError:
+            return True
+        release(handle)
+        return False
+
+
+def _mcp_probe(port, token):
+    """Authenticate and exercise a local, read-only Ombre tool; never trust /health alone."""
+    import asyncio
+    from mcp import ClientSession
+    from mcp.client.streamable_http import streamablehttp_client
+
+    async def probe():
+        try:
+            async with asyncio.timeout(MCP_PROBE_WAIT):
+                async with streamablehttp_client(
+                        f'http://127.0.0.1:{port}/mcp',
+                        headers={'Authorization': f'Bearer {token}'}) as (read, write, _):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        names = {item.name for item in (await session.list_tools()).tools}
+                        if not {'pulse', 'breath_search', 'hold'} <= names:
+                            raise ResidentError('mcp_tools')
+                        response = await session.call_tool('pulse', {'include_archive': False})
+                        if response.isError or not any(
+                                getattr(item, 'text', '').strip() for item in response.content):
+                            raise ResidentError('readonly_tool')
+        except ResidentError:
+            raise
+        except BaseException as exc:
+            # Preserve only a safe stage; callers must never log transport text or headers.
+            pending, names, statuses = [exc], set(), set()
+            while pending:
+                error = pending.pop()
+                names.add(type(error).__name__)
+                response = getattr(error, 'response', None)
+                if response is not None:
+                    statuses.add(getattr(response, 'status_code', None))
+                pending.extend(getattr(error, 'exceptions', ()))
+                cause = getattr(error, '__cause__', None)
+                if cause is not None:
+                    pending.append(cause)
+            stage = ('mcp_auth' if statuses & {401, 403} else
+                     'mcp_http' if 'HTTPStatusError' in names else 'mcp_init')
+            raise ResidentError(stage) from exc
+
+    asyncio.run(probe())
+
+
+def _known_resident(private, port):
+    try:
+        state = json.loads((private / 'ombre.process.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return False
+    return (state.get('port') == port and _pid_alive(state.get('host_pid'))
+            and _pid_alive(state.get('server_pid')) and _lock_held(private / 'ombre.lock'))
+
+
 def _environment(root, cfg, vault, private, config_path, token, port, api_key_overrides=None):
     from dotenv import dotenv_values
 
-    raw = dotenv_values(Path(root) / '.env', interpolate=False, encoding='utf-8-sig')
+    api_key_overrides = api_key_overrides or {}
+    if {'OMBRE_EMBED_API_KEY', 'OMBRE_COMPRESS_API_KEY'} <= api_key_overrides.keys():
+        raw = {}
+    else:
+        raw = dotenv_values(Path(root) / '.env', interpolate=False, encoding='utf-8-sig')
     env = {key: value for key, value in os.environ.items()
            if key.upper() in {'PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'USERPROFILE'}}
     temp = private / 'tmp'
     temp.mkdir(exist_ok=True)
-    api_key_overrides = api_key_overrides or {}
     env.update(
         PYTHONUTF8='1', PYTHONIOENCODING='utf-8',
         OMBRE_CONFIG_PATH=str(config_path), OMBRE_VAULT_DIR=str(vault),
@@ -92,28 +209,68 @@ def _environment(root, cfg, vault, private, config_path, token, port, api_key_ov
         OMBRE_MCP_REQUIRE_AUTH='true', OMBRE_MCP_AUTH_MODE='token',
         OMBRE_MCP_TOKEN=token, OMBRE_HOOK_SKIP='true',
         VEIL_OMBRE_STOP_PATH=str(private / 'ombre.stop'),
-        OMBRE_EMBED_API_KEY=(api_key_overrides.get('OMBRE_EMBED_API_KEY',
-                                                   raw.get('EMBED_API_KEY')) or '').strip(),
+        OMBRE_EMBED_API_KEY=(api_key_overrides['OMBRE_EMBED_API_KEY']
+                             if 'OMBRE_EMBED_API_KEY' in api_key_overrides
+                             else raw.get('EMBED_API_KEY') or '').strip(),
         TEMP=str(temp), TMP=str(temp),
     )
     if cfg.memory.get('ombre_model', True):
-        env['OMBRE_COMPRESS_API_KEY'] = (api_key_overrides.get(
-            'OMBRE_COMPRESS_API_KEY', raw.get(cfg.provider['api_key_env'])) or '').strip()
+        env['OMBRE_COMPRESS_API_KEY'] = (api_key_overrides['OMBRE_COMPRESS_API_KEY']
+            if 'OMBRE_COMPRESS_API_KEY' in api_key_overrides
+            else raw.get(cfg.provider['api_key_env']) or '').strip()
     else:
         env['OMBRE_COMPRESS_API_KEY'] = ''
     return env
 
 
 class ResidentProcess:
-    def __init__(self, process, private, host_pid=None):
+    def __init__(self, process, private, host_pid=None, *, restart_args=None):
         self.process = process
         self.private = private
         self.host_pid = host_pid
         self.stop_path = private / 'ombre.stop'
+        self.restart_args = restart_args
+        self.recovery_lock = __import__('threading').Lock()
+        self.closing = False
+        self.recovery_count = 0
 
-    def close(self):
+    def recover(self):
+        """Restart only our still-owned host; never adopt or kill an unknown listener."""
+        with self.recovery_lock:
+            if self.closing or not self.restart_args:
+                raise ResidentError('not_owned')
+            if self.recovery_count >= 2:
+                raise ResidentError('recovery_limit')
+            self.recovery_count += 1
+            exit_code = None
+            if self.process is not None and self.process.poll() is None:
+                # A failed MCP call can be transient. Verify the service before restarting it.
+                try:
+                    _mcp_probe(*self.restart_args['probe'])
+                    return {'exit_code': None, 'state': 'already_healthy'}
+                except ResidentError:
+                    pass
+                exit_code = self._stop_owned()
+            elif self.process is not None:
+                exit_code = self.process.poll()
+                self.process = None
+            elif _known_resident(self.private, self.restart_args['probe'][0]):
+                try:
+                    _mcp_probe(*self.restart_args['probe'])
+                    return {'exit_code': None, 'state': 'already_healthy'}
+                except ResidentError:
+                    exit_code = self._stop_owned()
+            port, token, replacement = start_or_connect(**self.restart_args['start'])
+            self.process, self.host_pid = replacement.process, replacement.host_pid
+            self.stop_path = replacement.stop_path
+            return {'exit_code': exit_code, 'state': 'restarted'}
+
+
+    def _stop_owned(self):
         if self.process is not None and self.process.poll() is not None:
-            return
+            exit_code = self.process.returncode
+            self.process = None
+            return exit_code
         state_path = self.private / 'ombre.process.json'
         try:
             state = json.loads(state_path.read_text(encoding='utf-8'))
@@ -131,8 +288,14 @@ class ResidentProcess:
                                capture_output=True, timeout=5)
             else:
                 self.process.terminate()
+            try:
                 self.process.wait(timeout=5)
-            return
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+            exit_code = self.process.returncode
+            self.process = None
+            return exit_code
         self.stop_path.touch()
         if self.process is not None:
             try:
@@ -161,9 +324,17 @@ class ResidentProcess:
                 else:
                     os.kill(expected_pid, 15)
         self.stop_path.unlink(missing_ok=True)
+        exit_code = self.process.returncode if self.process is not None else None
+        self.process = None
+        return exit_code
+
+    def close(self):
+        self.closing = True
+        self._stop_owned()
 
 
-def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None):
+def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None,
+                     startup_wait=STARTUP_WAIT):
     """Return (port, token, owned_process), starting Ombre only when needed."""
     root = Path(root).resolve()
     vault = (Path(data_root) if data_root is not None else root / 'data') / cfg.id / 'memory'
@@ -176,7 +347,8 @@ def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None):
     private = _safe_private(vault)
     dep = root / '.deps' / 'ombre'
     installed = (dep / 'installed').read_text(encoding='ascii').strip()
-    if installed != PINNED_OMBRE:
+    # setup_memory.py records the pin followed by the exact dependency-lock digest.
+    if installed != PINNED_OMBRE and not installed.startswith(PINNED_OMBRE + ':'):
         raise RuntimeError('pinned Ombre is not installed')
     source = dep / 'source'
     server = source / 'src' / 'server.py'
@@ -197,6 +369,17 @@ def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None):
     if len(token) < 40:
         token = secrets.token_urlsafe(48)
         token_path.write_text(token, encoding='ascii')
+    start_args = {'root': root, 'cfg': cfg, 'data_root': data_root,
+                  'api_key_overrides': api_key_overrides, 'startup_wait': 30}
+    if _health(port):
+        if not _known_resident(private, port):
+            raise ResidentError('port_identity')
+        _mcp_probe(port, token)
+        return port, token, ResidentProcess(None, private,
+            json.loads((private / 'ombre.process.json').read_text(encoding='utf-8')).get('host_pid'),
+            restart_args={'start': start_args, 'probe': (port, token)})
+    if _port_open(port):
+        raise ResidentError('port_identity')
     config = resident_config(cfg, vault, token)
     config_temp = config_path.with_suffix('.yaml.tmp')
     if config_temp.is_symlink():
@@ -207,26 +390,35 @@ def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None):
                        api_key_overrides=api_key_overrides)
 
     owned = None
-    if not _health(port):
-        log_path = private / 'process.log'
-        with log_path.open('a', encoding='utf-8') as log:
-            flags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-            owned = subprocess.Popen(
-                [str(python), str(root / 'ombre_host.py'), '--source', str(source),
-                 '--server', str(server), '--entry', str(entry), '--python', str(python),
-                 '--private', str(private), '--port', str(port)],
-                cwd=private, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
-                close_fds=True, creationflags=flags)
-        deadline = time.monotonic() + STARTUP_WAIT
-        while time.monotonic() < deadline:
-            if _health(port):
+    log_path = private / 'process.log'
+    with log_path.open('a', encoding='utf-8') as log:
+        flags = getattr(subprocess, 'DETACHED_PROCESS', 0) | getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        owned = subprocess.Popen(
+            [str(python), str(root / 'ombre_host.py'), '--source', str(source),
+             '--server', str(server), '--entry', str(entry), '--python', str(python),
+             '--private', str(private), '--port', str(port)],
+            cwd=private, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+            close_fds=True, creationflags=flags)
+    deadline = time.monotonic() + startup_wait
+    saw_http = False
+    while time.monotonic() < deadline:
+        if _health(port):
+            saw_http = True
+            try:
+                _mcp_probe(port, token)
                 break
-            if owned.poll() is not None:
-                raise RuntimeError('Ombre resident process failed to start')
-            time.sleep(0.2)
-        else:
-            ResidentProcess(owned, private).close()
-            raise RuntimeError('Ombre resident process startup timed out')
+            except ResidentError as exc:
+                if exc.stage in {'mcp_auth', 'mcp_tools', 'readonly_tool'}:
+                    ResidentProcess(owned, private).close()
+                    raise
+                if owned.poll() is not None:
+                    raise
+        if owned.poll() is not None:
+            raise ResidentError('process_exit')
+        time.sleep(0.2)
+    else:
+        ResidentProcess(owned, private).close()
+        raise ResidentError('mcp_init' if saw_http else 'http_unavailable')
     host_pid = None
     state_path = private / 'ombre.process.json'
     state_deadline = time.monotonic() + 2
@@ -239,7 +431,9 @@ def start_or_connect(root, cfg, *, data_root=None, api_key_overrides=None):
         except (OSError, ValueError):
             pass
         time.sleep(0.05)
-    return port, token, ResidentProcess(owned, private, host_pid)
+    resident = ResidentProcess(owned, private, host_pid,
+        restart_args={'start': start_args, 'probe': (port, token)})
+    return port, token, resident
 
 
 def mark_ready(private):

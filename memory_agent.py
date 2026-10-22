@@ -44,8 +44,10 @@ class MCP:
     # Search can invoke a metered embedding provider; do not replay it.
     RETRYABLE_READS = frozenset({'pulse'})
 
-    def __init__(self, url, token):
+    def __init__(self, url, token, *, recovery=None):
         self.url, self.token = url, token
+        self.recovery = recovery
+        self.recovery_count = 0
         self.diagnostic = None
         self.closed = False
         self.state_lock = threading.Lock()
@@ -114,6 +116,34 @@ class MCP:
             raise MemoryToolError('tool')
         return '\n'.join(c.text for c in response.content if hasattr(c, 'text'))
 
+    async def _recover(self, name, attempt):
+        if self.recovery is None or self.recovery_count >= 2:
+            return False
+        self.recovery_count += 1
+        try:
+            recovery_result = await asyncio.to_thread(self.recovery)
+        except Exception as exc:
+            stage = getattr(exc, 'stage', 'recovery')
+            self._diagnose(name, exc, attempt)
+            if self.diagnostic:
+                try:
+                    self.diagnostic({'code': 'recovery_failed', 'stage': stage,
+                                     'attempt': self.recovery_count})
+                except Exception:
+                    pass
+            return False
+        if self.diagnostic:
+            try:
+                facts = {'code': 'recovery_succeeded', 'stage': 'mcp_verified',
+                         'attempt': self.recovery_count}
+                if isinstance(recovery_result, dict):
+                    facts['state'] = recovery_result.get('state')
+                    facts['exit_code'] = recovery_result.get('exit_code')
+                self.diagnostic(facts)
+            except Exception:
+                pass
+        return True
+
     async def _serve(self):
         self.loop = asyncio.get_running_loop()
         self.requests = asyncio.Queue()
@@ -130,7 +160,7 @@ class MCP:
                 continue
             self.current_result = result
             try:
-                async with asyncio.timeout(85):
+                async with asyncio.timeout(200):
                     attempts = 2 if name in self.RETRYABLE_READS else 1
                     for attempt in range(1, attempts + 1):
                         try:
@@ -141,11 +171,18 @@ class MCP:
                             raise
                         except Exception as exc:
                             self._diagnose(name, exc, attempt)
+                            if attempt == attempts and name in self.RETRYABLE_READS:
+                                raise MemoryToolError('connection') from exc
+                            restored = await self._recover(name, attempt)
                             if attempt == attempts:
                                 raise MemoryToolError('connection' if attempts == 2 else 'unknown') from exc
+                            if self.recovery is not None and not restored:
+                                raise MemoryToolError('connection') from exc
                     result.set_result(text)
             except TimeoutError as exc:
                 self._diagnose(name, exc, 0)
+                # Inner transport handling already attempted bounded recovery when eligible.
+                # A write timeout stays uncertain and is never replayed.
                 result.set_exception(MemoryToolError('timeout'))
             except MemoryToolError as exc:
                 self._diagnose(name, exc, 0)
@@ -165,7 +202,7 @@ class MCP:
             except RuntimeError as exc:
                 raise MemoryToolError('closed') from exc
         try:
-            return result.result(timeout=90)
+            return result.result(timeout=210)
         except TimeoutError as exc:
             raise MemoryToolError('closed' if result.cancel() else 'timeout') from exc
 
@@ -178,7 +215,7 @@ class MCP:
             if self.thread.is_alive() and hasattr(self, 'loop') and not self.loop.is_closed():
                 self.loop.call_soon_threadsafe(self.requests.put_nowait, None)
         if self.thread.is_alive():
-            self.thread.join(timeout=95)
+            self.thread.join(timeout=215)
         if self.thread.is_alive():
             raise RuntimeError('Ombre did not stop')
 
@@ -217,7 +254,7 @@ def ombre_model_tokens(content, *, worst_case=False):
 
 
 @contextmanager
-def open_ombre(root, cfg, *, data_root=None):
+def open_ombre(root, cfg, *, data_root=None, api_key_overrides=None):
     from dotenv import dotenv_values
     from veil_agent import UserError
     from ombre_resident import mark_ready, start_or_connect
@@ -231,9 +268,10 @@ def open_ombre(root, cfg, *, data_root=None):
         rate = Decimal(str(settings['input_cny_per_million']))
         if not rate.is_finite() or rate < 0:
             raise ValueError('invalid embedding price')
-        key = dotenv_values(root / '.env', interpolate=False, encoding='utf-8-sig').get('EMBED_API_KEY')
-        if not key or not key.strip():
-            raise UserError('本机 .env 缺少 EMBED_API_KEY，请填写后重开。')
+        if settings.get('embedding_enabled', True):
+            key = dotenv_values(root / '.env', interpolate=False, encoding='utf-8-sig').get('EMBED_API_KEY')
+            if not key or not key.strip():
+                raise UserError('本机 .env 缺少 EMBED_API_KEY，请填写后重开。')
         vault = vault_path(data_root if data_root is not None else root / 'data', cfg.id)
         dep = root / '.deps' / 'ombre'
         executable = dep / 'venv' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
@@ -245,7 +283,8 @@ def open_ombre(root, cfg, *, data_root=None):
                                       encoding='utf-8-sig').get(cfg.provider['api_key_env'])
             if not model_key or not model_key.strip():
                 raise UserError('本机 .env 缺少聊天模型的 API Key（记忆打标和合并要用），请填写后重开。')
-        port, token, resident = start_or_connect(root, cfg, data_root=data_root)
+        port, token, resident = start_or_connect(
+            root, cfg, data_root=data_root, api_key_overrides=api_key_overrides)
     except UserError:
         raise
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
@@ -254,7 +293,8 @@ def open_ombre(root, cfg, *, data_root=None):
         raise UserError('记忆进程启动失败，请重新运行 setup.bat；本机记录仍保留。') from exc
     try:
         try:
-            backend = MCP(f'http://127.0.0.1:{port}/mcp', token)
+            backend = MCP(f'http://127.0.0.1:{port}/mcp', token,
+                          recovery=getattr(resident, 'recover', None))
             mark_ready(vault / '_agent')
         except Exception as exc:
             raise UserError('记忆进程启动失败，请重新运行 setup.bat；本机记录仍保留。') from exc
