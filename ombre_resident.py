@@ -163,8 +163,11 @@ def _mcp_probe(port, token):
         except BaseException as exc:
             # Preserve only a safe stage; callers must never log transport text or headers.
             pending, names, statuses = [exc], set(), set()
+            resident_stage = None
             while pending:
                 error = pending.pop()
+                if isinstance(error, ResidentError) and resident_stage is None:
+                    resident_stage = error.stage
                 names.add(type(error).__name__)
                 response = getattr(error, 'response', None)
                 if response is not None:
@@ -173,7 +176,8 @@ def _mcp_probe(port, token):
                 cause = getattr(error, '__cause__', None)
                 if cause is not None:
                     pending.append(cause)
-            stage = ('mcp_auth' if statuses & {401, 403} else
+            stage = (resident_stage if resident_stage is not None else
+                     'mcp_auth' if statuses & {401, 403} else
                      'mcp_http' if 'HTTPStatusError' in names else 'mcp_init')
             raise ResidentError(stage) from exc
 

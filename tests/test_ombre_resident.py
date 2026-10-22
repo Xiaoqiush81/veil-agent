@@ -14,6 +14,53 @@ from web_agent import Hub
 
 
 class OmbreResidentTests(unittest.TestCase):
+    def test_mcp_probe_preserves_stages_wrapped_in_exception_groups(self):
+        import time
+        from unittest import mock
+
+        from ombre_resident import _mcp_probe
+        import mcp
+        from mcp.client import streamable_http
+
+        class Stream:
+            async def __aenter__(self):
+                return object(), object(), None
+
+            async def __aexit__(self, *_args):
+                return False
+
+        class Session:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def initialize(self):
+                pass
+
+            async def list_tools(self):
+                if stage == 'mcp_tools':
+                    raise ExceptionGroup('fixture wrapper', [ExceptionGroup(
+                        'task group', [ResidentError(stage)])])
+                return SimpleNamespace(tools=[SimpleNamespace(name=name) for name in
+                    ('pulse', 'breath_search', 'hold')])
+
+            async def call_tool(self, *_args, **_kwargs):
+                raise ExceptionGroup('fixture wrapper', [ExceptionGroup(
+                    'task group', [ResidentError(stage)])])
+
+        for stage in ('mcp_tools', 'readonly_tool'):
+            with self.subTest(stage=stage):
+                started = time.monotonic()
+                with mock.patch.object(mcp, 'ClientSession', side_effect=lambda *_: Session()), \
+                     mock.patch.object(streamable_http, 'streamablehttp_client',
+                                        side_effect=lambda *_args, **_kwargs: Stream()):
+                    with self.assertRaises(ResidentError) as failed:
+                        _mcp_probe(18913, 'fixture-token')
+                self.assertEqual(failed.exception.stage, stage)
+                self.assertLess(time.monotonic() - started, 2.0)
+
     def test_environment_key_overrides_are_scoped_and_default_keeps_dotenv_keys(self):
         from unittest import mock
 
