@@ -186,7 +186,8 @@ output_cny_per_million = "8"
         self.assertEqual(len(updates), 2)
         self.assertIn('was enabled', updates[0]['text'])
         self.assertIn('was paused', updates[1]['text'])
-        self.assertTrue(all(datetime.fromisoformat(item['at']).utcoffset() is not None for item in updates))
+        self.assertTrue(all(datetime.fromisoformat(item['at']).utcoffset().total_seconds() == 0
+                            for item in updates))
 
     def test_exit_is_accepted_before_shutdown_and_completes_after_saved_chat(self):
         gate = threading.Event()

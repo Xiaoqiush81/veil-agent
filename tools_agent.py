@@ -147,7 +147,15 @@ class FilesystemTools:
         from veil_agent import UserError
         self.root = Path(root).resolve()
         self.cfg, self.store = cfg, store
-        self.cap_path = Path(store.root) / cfg.id / 'capabilities.json'
+        role_path = Path(store.root) / cfg.id
+        role_root = role_path.resolve()
+        # Activity transitions write capability history even when file tools
+        # are absent from the role configuration. Validate the role boundary
+        # before exposing that persistent capability path in every branch.
+        expected_role = role_path.parent.resolve() / cfg.id
+        if _path_key(expected_role) != _path_key(role_root) or not role_root.is_relative_to(self.root):
+            raise UserError('角色数据目录被重定向，文件工具已停止。')
+        self.cap_path = role_path / 'capabilities.json'
         self.lab = None
         settings = cfg.tools or {}
         if cfg.tools is None:
@@ -162,13 +170,8 @@ class FilesystemTools:
             raise UserError('文件工具配置无效，请检查 character.toml。')
         self.enabled = settings.get('enabled', True)
         self.folder_name = Path(settings.get('folder', f'data/{cfg.id}/workspace')).name
-        role_path = Path(store.root) / cfg.id
-        role_root = role_path.resolve()
         # Resolve the parent first: Windows temp roots can have an alias, while
         # resolving the role itself must still reveal a redirected role folder.
-        expected_role = role_path.parent.resolve() / cfg.id
-        if _path_key(expected_role) != _path_key(role_root) or not role_root.is_relative_to(self.root):
-            raise UserError('角色数据目录被重定向，文件工具已停止。')
         configured = (self.root / settings.get('folder', f'data/{cfg.id}/workspace')).resolve()
         if not configured.is_relative_to(role_root):
             raise UserError('文件工具文件夹必须位于该角色自己的 data 目录。')

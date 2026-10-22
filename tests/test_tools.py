@@ -57,6 +57,20 @@ class ToolPolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             checked_path(self.workspace, str(link / 'secret.txt'))
 
+    def test_role_directory_redirection_is_rejected_without_tools_config(self):
+        data = self.root / 'data'
+        data.mkdir()
+        other_role = data / 'other'
+        other_role.mkdir()
+        try:
+            (data / 'test').symlink_to(other_role, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest('directory symlinks are unavailable for this account')
+
+        from veil_agent import UserError
+        with self.assertRaisesRegex(UserError, '角色数据目录被重定向'):
+            FilesystemTools(self.root, SimpleNamespace(id='test', tools=None), Store(data))
+
     def test_write_requires_consent_and_never_overwrites(self):
         manager = self.manager()
         manager.client.call.return_value = 'written'
