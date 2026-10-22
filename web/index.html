@@ -115,7 +115,7 @@ let speechRecognition=null, speechSession=null, speechState='idle', speechStopRe
 let after=0, busy=true, stopping=false, stopped=false, typing=null, sending=false;
 let revealQueue=[], revealTimer=null, roundStartedAt=0, roundHasReply=false, previousMessage=null;
 let pendingApproval=null, activityEnabled=false, exiting=false;
-let selectedImage=null,awaitingImage=null;
+let selectedImage=null;const awaitingImages=new Map();
 let imageChoice=0;
 const draftRequests=new Map();
 const IMAGE_TYPES=new Set(['image/png','image/jpeg','image/gif','image/webp']);
@@ -240,7 +240,8 @@ function revealNext(){
   if(delay)revealTimer=setTimeout(reveal,delay);else reveal();
 }
 function receiveEvent(e,initial){
-  if(e.kind==='user'&&awaitingImage&&selectedImage===awaitingImage){clearImage();awaitingImage=null}
+  const confirmedImage=e.kind==='user'&&e.request_id?awaitingImages.get(e.request_id):null;
+  if(confirmedImage){if(selectedImage===confirmedImage)clearImage();awaitingImages.delete(e.request_id)}
   if(initial||e.history){
     if(e.kind==='user'){roundStartedAt=Date.parse(e.time)||Date.now();roundHasReply=false}
     if(e.kind==='assistant')roundHasReply=true;
@@ -458,6 +459,7 @@ async function send(text){
     draftRequests.set(payloadKey,crypto.randomUUID());
   }
   const requestId=fromBox?draftRequests.get(payloadKey):crypto.randomUUID();
+  if(attachedImage)awaitingImages.set(requestId,attachedImage);
   if(attachedImage?.cancel)attachedImage.cancel.disabled=true;
   sending=true;setBusy(true);
   try{
@@ -465,6 +467,7 @@ async function send(text){
     const r=await api('/api/send',{text,request_id:requestId,media:media?{id:media.id}:undefined});
     let result={};try{result=await r.json()}catch(e){}
     if(!r.ok){
+      awaitingImages.delete(requestId);
       if(attachedImage&&result.error==='invalid media')attachedImage.media=null;
       add('error',r.status===409&&result.error==='busy'
         ?'Peter 正在处理上一条消息；这条没有发送，输入已保留。'
@@ -478,8 +481,7 @@ async function send(text){
         }
         draftRequests.delete(payloadKey);
       }
-      if(attachedImage&&selectedImage===attachedImage&&result.duplicate)clearImage();
-      else if(attachedImage)awaitingImage=attachedImage;
+      if(attachedImage&&result.duplicate){awaitingImages.delete(requestId);if(selectedImage===attachedImage)clearImage()}
       if(result.duplicate)add('notice','这条消息此前已提交，没有重复发送。');
     }
   }catch(e){add('error',attachedImage?'图片发送未确认，图片仍在发送区；请稍后重试。':'发送结果未确认，输入已保留；页面不会自动重发。')}

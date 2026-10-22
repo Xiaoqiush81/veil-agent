@@ -525,10 +525,10 @@ class FilesystemTools:
             save_capabilities(self.cap_path, row)
             self.capability_event = event
             self.capability_event_model = event
+            return True
         except Exception as exc:
-            self.enabled = False
-            from veil_agent import UserError
-            raise UserError('图片能力通知无法安全保存，工具已停止；请保留 data 文件夹。') from exc
+            self.photo_notice_error = str(exc)
+            return False
 
     def _description(self, names):
         if not names:

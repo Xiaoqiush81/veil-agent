@@ -80,6 +80,8 @@ class Hub:
         self.submissions = OrderedDict()  # recent request ids -> normalized text digest
         self.autonomy = None
         self.capability_record = lambda: None
+        self.defer_outputs = False
+        self.deferred_outputs = []
         self.current_capabilities = lambda: 'Current capabilities are not available.'
         self.activity_transition = lambda enabled: self.activity.set(enabled)
         self.autonomy_busy = False
@@ -232,7 +234,7 @@ class Hub:
                                 'time': now(), **metadata})
             return event_id
 
-    def output(self, text):
+    def _publish_output(self, text):
         text = str(text)
         prefix = f'{self.name}: '
         if text.startswith('新对话已开始；'):
@@ -245,6 +247,23 @@ class Hub:
             self.push('notice', text.split('。')[0] + '。')   # drop the terminal-only command hints
         else:
             self.push('notice', text)
+
+    def output(self, text):
+        with self.cond:
+            if self.defer_outputs:
+                self.deferred_outputs.append(str(text))
+                return
+        self._publish_output(text)
+
+    def finish_media_submission(self, committed, text, media, request_id):
+        with self.cond:
+            if committed:
+                self.push('user', text, media=media, request_id=request_id)
+            buffered = self.deferred_outputs
+            self.deferred_outputs = []
+            self.defer_outputs = False
+        for output in buffered:
+            self._publish_output(output)
 
     def input_fn(self, _prompt=''):
         with self.cond:
@@ -259,6 +278,9 @@ class Hub:
                 with self.cond:
                     self.busy = True
                 if isinstance(text, tuple):
+                    with self.cond:
+                        self.defer_outputs = True
+                        self.deferred_outputs = []
                     return ChatInput(text[0], text[1], text[2] if len(text) > 2 else None)
                 return text
             if self.stopping or self.stopped:
@@ -280,6 +302,9 @@ class Hub:
             with self.cond:
                 self.busy = True
             if isinstance(text, tuple):
+                with self.cond:
+                    self.defer_outputs = True
+                    self.deferred_outputs = []
                 return ChatInput(text[0], text[1], text[2] if len(text) > 2 else None)
             return text
 
@@ -343,8 +368,7 @@ class Hub:
             if media_id is not None and not media:
                 return 'media'
             def complete(committed):
-                if committed:
-                    self.push('user', text, media=media, request_id=request_id)
+                self.finish_media_submission(committed, text, media, request_id)
             if self.autonomy_busy:
                 if not media:
                     self.push('user', text, request_id=request_id)
@@ -576,7 +600,8 @@ def serve_chat(chat, hub):
     files = files or chat.tools
     announce_photo = getattr(files, 'announce_photo_input', None)
     if callable(announce_photo):
-        announce_photo()
+        if announce_photo() is False:
+            hub.output('图片能力通知暂时无法保存；聊天仍可使用，下次启动会重试。')
         chat.pending_capability_event = getattr(chat.tools, 'capability_event', None)
         chat.pending_capability_event_model = chat.pending_capability_event
     for message in chat.history_events:

@@ -50,7 +50,7 @@ const failSafe = setTimeout(() => { console.error('SMOKE timeout'); app.exit(1);
         imageAttempts++; assert.equal(body.text, '[图片]');
         if (imageAttempts === 1) { res.statusCode = 409; res.end(JSON.stringify({ error: 'busy' })); return; }
         imageSends++;
-        events.push({ id: 4, kind: 'user', text: '[图片]', media: { id: 'fictional-image', filename: 'fictional-image.png', mime: 'image/png', name: 'fictional.png' }, time: new Date().toISOString() });
+        events.push({ id: 4, kind: 'user', text: '[图片]', request_id: body.request_id, media: { id: 'fictional-image', filename: 'fictional-image.png', mime: 'image/png', name: 'fictional.png' }, time: new Date().toISOString() });
       } else {
         sends++;
         assert.equal(body.text, 'fictional hello');

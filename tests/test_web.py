@@ -107,7 +107,10 @@ output_cny_per_million = "8"
         media = result['media']
         self.assertEqual((self.store.root / 'test' / 'media' / media['filename']).read_bytes(), png)
         event = self.hub.snapshot(0)['events'][-1]
-        user_event = next(row for row in self.hub.snapshot(0)['events'] if row['kind'] == 'user')
+        events = self.hub.snapshot(0)['events']
+        user_event = next(row for row in events if row['kind'] == 'user')
+        self.assertLess(events.index(user_event), next(i for i, row in enumerate(events)
+                                                      if row['kind'] == 'assistant'))
         self.assertEqual(user_event['media']['id'], media['id'])
         url = f'/media/{media["filename"]}?t={TOKEN}'
         for bad_url in (f'/media/{media["filename"]}', f'/media/{media["filename"]}?t=wrong'):
@@ -236,6 +239,15 @@ output_cny_per_million = "8"
         matching = [item for item in row['capability_updates'] if 'send you photos' in item['text']]
         self.assertEqual(len(matching), 1)
         self.assertEqual(row['pending_event'], first)
+
+    def test_photo_notice_save_failure_does_not_disable_chat_tools(self):
+        manager = object.__new__(FilesystemTools)
+        manager.cap_path = self.store.root / 'test' / 'capabilities.json'
+        manager.capability_event = manager.capability_event_model = None
+        manager.enabled = True
+        with patch('tools_agent.save_capabilities', side_effect=OSError('fictional')):
+            self.assertFalse(manager.announce_photo_input())
+        self.assertTrue(manager.enabled)
 
     def test_photo_is_budgeted_as_vision_tokens_and_collapsed_after_first_request(self):
         messages = [{'role': 'user', 'content': [
