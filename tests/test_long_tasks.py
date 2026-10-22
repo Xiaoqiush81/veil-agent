@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -153,6 +154,39 @@ class LongTaskTests(unittest.TestCase):
         event = reopened.read()['tool_events'][-1]
         self.assertEqual(event['state'], '经检查确认')
         self.assertIn(operation_id, event['evidence'])
+
+    def test_pending_lab_move_requires_destination_digest_after_restart(self):
+        self.create()
+        task_id = self.tasks.read()['task_id']
+        content = b'Fictional archived file, complete.\r\n'
+        digest = hashlib.sha256(content).hexdigest()
+        destination = 'lab/archive/play/v1.html'
+        self.assertEqual(self.tasks.before_tool(
+            'move_lab_file', destination, autonomy=True,
+            args={'source': 'lab/play/v1.html', 'destination': destination}), (None, True))
+        operation_id = self.tasks.read()['pending_action']['operation_id']
+        self.tasks.finish_tool('move_lab_file', destination, '成功',
+                               f'File moved intact ({len(content)} bytes, SHA-256 {digest}).')
+
+        reopened = LongTaskStore(self.store, 'peter')
+        reopened.set_tool_step(1)
+        reopened.observe_tool_result('read_text_file', destination, '成功', 'different')
+        self.assertIsNone(reopened.read()['pending_action']['verified_in_step'])
+        reopened.observe_tool_result('read_text_file', destination, '成功', content.decode())
+        self.assertEqual(reopened.read()['pending_action']['verified_in_step'], 1)
+        reopened.set_tool_step(2)
+        _, state, _ = reopened.invoke('long_task_update', {
+            'action': 'update', 'task_id': task_id, 'resolve_pending': True,
+            'pending_operation_id': operation_id, 'progress_update': 'Archived file readback matched.'})
+        self.assertEqual(state, '成功')
+        self.assertIsNone(reopened.read()['pending_action'])
+
+        self.assertEqual(reopened.before_tool(
+            'move_lab_file', destination, autonomy=True,
+            args={'source': 'lab/play/v1.html', 'destination': destination}), (None, True))
+        reopened.set_tool_step(3)
+        reopened.observe_tool_result('read_text_file', destination, '成功', content.decode())
+        self.assertIsNone(reopened.read()['pending_action']['verified_in_step'])
 
     def test_append_verification_checks_the_written_suffix(self):
         self.create()

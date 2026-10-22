@@ -4,6 +4,7 @@ import hashlib
 import json
 import ntpath
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -13,7 +14,7 @@ from veil_agent import UserError, now
 
 TASK_STATUS = ('active', 'paused', 'blocked', 'completed')
 SIDE_EFFECT_TOOLS = {
-    'write_file', 'append_file', 'grant_append', 'create_directory', 'hold', 'trace',
+    'write_file', 'append_file', 'grant_append', 'create_directory', 'move_lab_file', 'hold', 'trace',
     'letter_write', 'letter_lock_update', 'anchor', 'release', 'plan',
 }
 READ_ONLY_TOOLS = {
@@ -33,7 +34,7 @@ TASK_UPDATE_TOOL = SimpleNamespace(name='long_task_update', description=(
     'an unfinished task cannot be overwritten. Use action=update with its exact task_id to append '
     'confirmed progress and evidence, set the next step, pause, mark a blocker, or mark the whole goal '
     'completed. A session ending or reaching a tool limit is not task completion. If pending_action exists, '
-    'first inspect the exact target using read_text_file; for file writes the program checks actual content against '
+    'first inspect the exact target using read_text_file; for file writes and lab moves the program checks actual content against '
     'the saved operation effect. Resolve only with the pending operation_id shown by long_task_status and after '
     'the program records a matching read. If the effect cannot be confirmed, mark the task blocked and do not repeat it. '
     'This state does not grant file or memory permissions.'), inputSchema={
@@ -348,10 +349,20 @@ class LongTaskStore:
             memory_id = args.get('memory_id')
             if isinstance(memory_id, str) and memory_id.strip():
                 return memory_id
+        if name == 'move_lab_file' and isinstance(args, dict):
+            destination = args.get('destination')
+            if isinstance(destination, str) and destination.strip():
+                return destination
         return fallback
 
     @staticmethod
     def _expected_effect(name, args):
+        if name == 'move_lab_file' and isinstance(args, dict):
+            if all(isinstance(args.get(key), str) for key in ('source', 'destination')):
+                # The successful move result carries the verified destination digest.
+                # If the process stops before persisting that result, recovery fails closed.
+                return {'kind': 'exact', 'sha256': None, 'byte_length': None}
+            return None
         if name not in ('write_file', 'append_file', 'trace') or not isinstance(args, dict):
             return None
         content = args.get('content')
@@ -393,7 +404,7 @@ class LongTaskStore:
         blocked, _ = self.before_tool(name, target, autonomy=True)
         return blocked
 
-    def finish_tool(self, name, target, state):
+    def finish_tool(self, name, target, state, result=None):
         with self.store.mutex:
             task = self._read_file()
             if not task or task['status'] != 'active':
@@ -413,6 +424,12 @@ class LongTaskStore:
             if state == '成功':
                 pending['state'] = '成功，需核实'
                 pending['verified_in_step'] = None
+                effect = pending.get('expected_effect')
+                if name == 'move_lab_file' and isinstance(effect, dict):
+                    match = re.search(r'\((\d+) bytes, SHA-256 ([0-9a-f]{64})\)', result or '')
+                    if match:
+                        effect['byte_length'] = int(match.group(1))
+                        effect['sha256'] = match.group(2)
             elif state == '被拒绝':
                 task['pending_action'] = None
             else:
@@ -438,9 +455,13 @@ class LongTaskStore:
             content = result.encode('utf-8')
             effect = pending.get('expected_effect')
             if effect is None:
-                if pending['tool'] in ('write_file', 'append_file') or not result.strip():
+                if pending['tool'] in ('write_file', 'append_file', 'move_lab_file') or not result.strip():
                     return
             else:
+                if pending['tool'] == 'move_lab_file' and (
+                        not isinstance(effect.get('sha256'), str) or
+                        not isinstance(effect.get('byte_length'), int)):
+                    return
                 if effect['kind'] == 'memory_body':
                     if name != 'memory_read':
                         return

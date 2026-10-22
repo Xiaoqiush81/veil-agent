@@ -22,7 +22,7 @@ ALLOW = {
 }
 ASK = {'write_file', 'append_file', 'grant_append'}
 DENY = {'edit_file', 'move_file'}
-LAB_ONLY = {'create_directory'}
+LAB_ONLY = {'create_directory', 'move_lab_file'}
 # Memory tools (ticket 007) are offered by memory_native.ToolSet, never by the filesystem server.
 NATIVE = {'hold', 'breath_search', 'trace', 'dream', 'letter_write', 'letter_read',
           'letter_lock_update', 'anchor', 'release', 'plan', 'pulse', 'memory_history', 'memory_catalog', 'memory_read'}
@@ -178,7 +178,7 @@ class FilesystemTools:
             return
         self.tools = [tool for tool in self.client.tools
                       if tool_policy(tool.name) != 'deny'
-                      and tool.name not in ('append_file', 'grant_append', 'create_directory')]
+                      and tool.name not in ('append_file', 'grant_append', 'create_directory', 'move_lab_file')]
         self._open_lab(settings)
         if self.lab:
             self.tools.append(SimpleNamespace(name='create_directory',
@@ -186,6 +186,15 @@ class FilesystemTools:
                             'No confirmation needed. Directories outside lab are forbidden.',
                 inputSchema={'type': 'object', 'properties': {'path': {'type': 'string'}},
                              'required': ['path']}))
+            self.tools.append(SimpleNamespace(name='move_lab_file',
+                description=('Move one regular file between a normal lab folder and lab/archive/. '
+                             'For archiving, preserve its relative path, e.g. lab/play/v1.html to '
+                             'lab/archive/play/v1.html. Restoring may target another lab folder. '
+                             'No confirmation needed; existing targets are rejected.'),
+                inputSchema={'type': 'object', 'properties': {
+                    'source': {'type': 'string', 'description': 'Existing file path inside lab/.'},
+                    'destination': {'type': 'string', 'description': 'New lab/archive/ path or lab restore path.'}},
+                    'required': ['source', 'destination'], 'additionalProperties': False}))
         self.tools.append(SimpleNamespace(name='append_file',
             description='Append text to an existing workspace file without changing old content. '
                         'Inside lab no confirmation is needed. Outside lab requires consent '
@@ -277,7 +286,8 @@ class FilesystemTools:
                 old_lab = previous.get('lab', False) if previous else False
                 if core['lab'] and core['lab'] != old_lab:
                     changes.append(f'你自己的实验室 `{self.lab.name}/` 开放了：里面放什么由你决定；'
-                                   '可直接建文件夹、新建和追加，不能覆盖、删除或执行脚本；日记授权独立')
+                                   '可直接建文件夹、新建和追加，也可在普通目录与 archive/ 之间移动单个文件；'
+                                   '不能覆盖、删除或执行脚本；日记授权独立')
                 elif old_lab and not core['lab']:
                     changes.append('实验室免确认权限已关闭')
                 old_messaging = previous.get('messaging', False) if previous else False
@@ -397,8 +407,11 @@ class FilesystemTools:
                 f'Your own lab is open at {lab}/, relative to the workspace tool root; '
                 f'use paths such as {lab}/research/v1.md, never workspace/{lab}/. '
                 'Choose its contents yourself. Within lab you may create directories and new files '
-                'and append to existing files without asking. Never overwrite, edit in place, delete, '
-                'move files, or execute scripts (the script allowlist is empty). Use plan B: '
+                'and append to existing files without asking. You may move a regular file only '
+                'between a normal lab folder and lab/archive/; keep its relative path when archiving '
+                'and choose any lab folder when restoring. Existing destinations are rejected. '
+                'Never overwrite, edit in place, delete, move folders, move outside the lab, or '
+                'execute scripts (the script allowlist is empty). Use plan B: '
                 'keep long documents as v1.md, v2.md, v3.md in your own folders, and short pieces '
                 'as dated files. Before saving a new version, fully read the previous version; '
                 'if truncated, use read_text_file head/tail in sections. Check the returned version '
@@ -412,6 +425,8 @@ class FilesystemTools:
         policy = tool_policy(name)
         if policy == 'deny' or name not in {tool.name for tool in self.tools}:
             return 'This tool is not authorized for the current role. Choose an available tool; permissions cannot be bypassed.', '被拒绝', name
+        if name == 'move_lab_file':
+            return self._move_lab_file(args)
         try:
             resolved = {}
             for key, index, value in _path_arguments(name, args):
@@ -501,6 +516,151 @@ class FilesystemTools:
         if not resolved.is_relative_to(self.lab):
             raise ValueError('outside lab')
         return resolved
+
+    def _ensure_lab_parent(self, raw):
+        parts = re.split(r'[/\\]', raw)
+        if len(parts) < 2:
+            raise ValueError('destination must name a file')
+        parent_parts = parts[:-1]
+        for end in range(1, len(parent_parts) + 1):
+            directory_raw = '/'.join(parent_parts[:end])
+            directory = self._checked_lab_path(directory_raw)
+            if directory.exists():
+                if _redirected(directory) or not directory.is_dir():
+                    raise ValueError('destination parent is not a normal directory')
+                continue
+            try:
+                directory.mkdir()
+            except FileExistsError:
+                pass
+            directory = self._checked_lab_path(directory_raw)
+            if not directory.is_dir() or _redirected(directory):
+                raise ValueError('destination parent changed')
+
+    def _move_lab_file(self, args):
+        summary = 'move_lab_file'
+        source = destination = None
+        source_identity = None
+        try:
+            if (not isinstance(args, dict) or set(args) != {'source', 'destination'} or
+                    not all(isinstance(args[key], str) for key in ('source', 'destination'))):
+                return 'Move requires source and destination lab paths. No file was moved.', '被拒绝', summary
+            source_raw, destination_raw = args['source'], args['destination']
+            source = self._checked_lab_path(source_raw)
+            destination = self._checked_lab_path(destination_raw)
+            summary = f'{_summary(self.workspace, source)} -> {_summary(self.workspace, destination)}'
+            source_relative = source.relative_to(self.lab)
+            destination_relative = destination.relative_to(self.lab)
+            source_in_archive = bool(source_relative.parts and source_relative.parts[0].casefold() == 'archive')
+            destination_in_archive = bool(destination_relative.parts and
+                                           destination_relative.parts[0].casefold() == 'archive')
+            if source_in_archive == destination_in_archive:
+                return ('A file may move only between a normal lab folder and lab/archive/. '
+                        'No file was moved.', '被拒绝', summary)
+            if destination_in_archive:
+                expected = ('archive', *source_relative.parts)
+                if tuple(part.casefold() for part in destination_relative.parts) != tuple(
+                        part.casefold() for part in expected):
+                    return ('Archiving must preserve the file path under lab/archive/. No file was moved.',
+                            '被拒绝', summary)
+            if source.is_symlink() or _redirected(source) or not source.is_file():
+                return 'Only an existing regular file can be moved. No file was moved.', '被拒绝', summary
+            info = source.stat(follow_symlinks=False)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                return 'Only an unlinked regular file can be moved. No file was moved.', '被拒绝', summary
+            self._ensure_lab_parent(destination_raw)
+            # Re-resolve after creating destination parents and immediately before the
+            # no-replace operation. Existing case-insensitive aliases are resolved too.
+            source = self._checked_lab_path(source_raw)
+            destination = self._checked_lab_path(destination_raw)
+            if source.is_symlink() or _redirected(source) or not source.is_file():
+                return 'The source changed while preparing the move. No file was moved.', '被拒绝', summary
+            if destination.exists() or destination.is_symlink():
+                return 'The destination already exists; nothing was overwritten or moved. Choose another destination.', '被拒绝', summary
+            before = source.stat(follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                return 'Only an unlinked regular file can be moved. No file was moved.', '被拒绝', summary
+            source_identity = (before.st_dev, before.st_ino, before.st_size)
+            digest = hashlib.sha256()
+            with source.open('rb') as handle:
+                opened = os.fstat(handle.fileno())
+                if (opened.st_dev, opened.st_ino, opened.st_size) != (
+                        before.st_dev, before.st_ino, before.st_size):
+                    return 'The source changed while it was being checked. No file was moved.', '被拒绝', summary
+                for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                    digest.update(chunk)
+                after_read = os.fstat(handle.fileno())
+            if (after_read.st_dev, after_read.st_ino, after_read.st_size, after_read.st_mtime_ns) != (
+                    before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+                return 'The source changed while it was being checked. No file was moved.', '被拒绝', summary
+            expected_digest = digest.digest()
+            source = self._checked_lab_path(source_raw)
+            destination = self._checked_lab_path(destination_raw)
+            if destination.exists() or destination.is_symlink():
+                return 'The destination already exists; nothing was overwritten or moved. Choose another destination.', '被拒绝', summary
+            before_move = source.stat(follow_symlinks=False)
+            if (before_move.st_dev, before_move.st_ino, before_move.st_size, before_move.st_mtime_ns) != (
+                    before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
+                return 'The source changed before the move. No file was moved.', '被拒绝', summary
+            if os.name == 'nt':
+                # Windows os.rename uses a no-replace move and keeps the operation
+                # within the same volume; the source remains if the move fails.
+                os.rename(source, destination)
+            else:
+                # POSIX os.rename replaces an existing target. A hard-link creation
+                # is atomic and no-replace; removing the source afterwards cannot
+                # truncate or rewrite file contents. If unlink fails, both names remain.
+                os.link(source, destination, follow_symlinks=False)
+                linked = destination.stat(follow_symlinks=False)
+                if (linked.st_dev, linked.st_ino, linked.st_size) != (
+                        before.st_dev, before.st_ino, before.st_size):
+                    os.unlink(destination)
+                    raise OSError('source changed during move')
+                try:
+                    os.unlink(source)
+                except OSError:
+                    try:
+                        os.unlink(destination)
+                    except OSError:
+                        pass
+                    raise
+            moved = destination.stat(follow_symlinks=False)
+            if (not stat.S_ISREG(moved.st_mode) or (moved.st_dev, moved.st_ino, moved.st_size) !=
+                    (before.st_dev, before.st_ino, before.st_size)):
+                raise OSError('moved file identity changed')
+            verify = hashlib.sha256()
+            with destination.open('rb') as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                    verify.update(chunk)
+            if verify.digest() != expected_digest:
+                raise OSError('moved file content verification failed')
+            if source.exists():
+                raise OSError('source remained after move')
+            return (f'File moved intact ({before.st_size} bytes, SHA-256 {verify.hexdigest()}).',
+                    '成功', summary)
+        except FileExistsError:
+            return 'The destination already exists; nothing was overwritten or moved. Choose another destination.', '被拒绝', summary
+        except ValueError:
+            return 'The move path is outside the permitted lab/archive area or crosses a link. No file was moved.', '被拒绝', summary
+        except (OSError, RuntimeError):
+            if source is not None and destination is not None:
+                try:
+                    moved = destination.stat(follow_symlinks=False)
+                    if (not source.exists() and stat.S_ISREG(moved.st_mode) and
+                            (moved.st_dev, moved.st_ino, moved.st_size) == source_identity and
+                            not _redirected(destination)):
+                        if os.name == 'nt':
+                            os.rename(destination, source)
+                        else:
+                            os.link(destination, source, follow_symlinks=False)
+                            try:
+                                os.unlink(destination)
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+            return ('The move could not be completed safely. Check that the original file is still present '
+                    'before retrying; no file contents were intentionally changed.'), '出错', summary
 
     def _invoke_lab(self, name, raw, args, summary):
         try:
