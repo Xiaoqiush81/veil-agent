@@ -20,7 +20,7 @@ Peter 自己决定某条消息用语音发：网页里出现一条语音气泡�
 1. `send_message` 增加可选参数 `voice`（布尔）。参数说明只写事实：“true sends this message as a voice message in your own voice; the text is also kept.” 不写何时该用语音、不写风格要求，由 Peter 自己决定。`veil_agent.py` `self_facts` 里固定写着 “You have no voice.”：语音配置齐全时改为如实的一句（例如 “You can speak in voice messages with send_message voice: true.”），不全时保持原句，不能和工具矛盾。
 2. `voice:true` 时本地服务调用 MiniMax 生成 MP3，存到 `data/peter/media/`；`chat.jsonl` 这条 assistant 记录存音频相对路径和原文。之后的上下文里这条消息显示为 `[voice message] <原文>`，让 Peter 知道自己说过、是用语音说的。
 3. 网页显示语音气泡（播放键、时长），可展开原文；刷新、重启后仍可回放。
-4. 每次 MiniMax 费用按 MiniMax 计费字符数（中文一字算 2，其余算 1）× `.env` 中 `MINIMAX_CNY_PER_10K_CHARS`（默认 3.5，即 hd 价；`.env.example` 加此键）写入现有花费记录，`/cost` 能看到；预算检查与聊天共用现有每日上限。
+4. 每次 MiniMax 费用按 MiniMax 计费字符数（中文一字算 2，其余算 1）÷ 10000 × `.env` 中 `MINIMAX_CNY_PER_10K_CHARS`（默认 3.5，即 hd 价；`.env.example` 加此键）写入现有花费记录，`/cost` 能看到；预算检查与聊天共用现有每日上限。
 5. 生成失败（key 错、区域不对、余额不足、网络）：这条消息改为普通文字发出并标“语音生成失败”和中文原因；工具结果如实告诉 Peter 语音没发出去、发的是文字。不自动重试。
 6. 能力通知：按现有机制给 Peter 一次性英文通知并写入 `capability_history`，例如 “You can now send a message as a voice message in your own voice by calling send_message with voice: true.”
 7. 更新 STATUS.md、HANDOFF.md。
