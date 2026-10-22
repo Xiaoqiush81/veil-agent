@@ -162,6 +162,23 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError):
             client.call('pulse', {})
 
+    def test_queued_call_wait_includes_jobs_ahead(self):
+        from concurrent.futures import Future
+        from unittest import mock
+
+        client = self.backend(['queued result'])
+        original_result = Future.result
+        timeouts = []
+
+        def record_timeout(future, timeout=None):
+            timeouts.append(timeout)
+            return original_result(future, timeout=timeout)
+
+        with mock.patch.object(client.requests, 'qsize', return_value=3), \
+             mock.patch.object(Future, 'result', new=record_timeout):
+            self.assertEqual(client.call('pulse', {}), 'queued result')
+        self.assertEqual(timeouts, [1050])
+
 
 if __name__ == '__main__':
     unittest.main()

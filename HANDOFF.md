@@ -1,6 +1,6 @@
 # 交接
 
-- 2026-10-22 Codex：工单 060，分支 `ticket/060-ombre-runtime-recovery`，基于当前 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。新增运行期 MCP 故障后统一恢复入口：本角色进程元数据/端口/锁/token 核验、MCP 初始化/工具列表/只读 `pulse` 探测、单线程并发协调、有限恢复与安全阶段诊断；只恢复 VEIL 持有或可由本角色 lock 证明的服务。`hold`、`breath_search` 及其他工具不重放，结果不明仍保持不明。固定 Ombre 3.6.14 临时 vault 真实测试覆盖终止 server 子进程、并发 `pulse` 只恢复一次、重启后真实 `breath_search`，以及 `hold` 已落盘/回执丢失/服务重启后仅一条记忆。完整离线 suite 332 项通过、3 项跳过，真实集成 1 项通过；测试只用离线配置、固定 Ombre、临时虚构数据，没有读 `.env`、真实记忆或调用付费接口。当前下一步：复核完整 diff/格式，提交并推送 PR；不合并、不申请 Claude、不等待 CodeRabbit/CI。PR 后提供 Lan 隔离 Windows 验收步骤。若换窗口，先检查分支、工作区和 PR 状态，不碰真实 Ombre。
+- 2026-10-22 Codex：工单 060，PR #96，分支 `ticket/060-ombre-runtime-recovery`，基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。按 review 修复 `_mcp_probe()` 的取消传播及嵌套阶段保留、被接管 Ombre host 锁释放等待、`open_ombre()` 隔离凭据预检和 MCP 排队调用的有界等待，并补虚构回归。Ombre resident 与 MCP recovery 定向回归 24 项已通过（Python 3.12），`git diff --check` 通过；当前下一步：提交并推送现有 PR #96，不新开 PR、不合并、不等待机器人。GitHub CI 与真实 Windows 体验仍待后续确认。
 
 - 2026-10-22 Codex：工单 054、PR #91，分支 `ticket/054-long-task-checkpoint-recovery`。CI 首轮发现 `trace` 开始时保存 memory ID、结束时却传展示标题给 `finish_tool`，严格目标匹配因此拒绝；修复为开始、结束和 `memory_read` 核实均传 memory ID，未放宽任何匹配。带 `content` 的 trace 仍需同 ID、完整且正文哈希匹配；错误内容、分页或未知结果保持 pending。40 条进度已满时仍可直接 `resolve_pending`，不新增第 41 条普通进度。修复提交 `8da093b` 的 Tests run 824 已在 Ubuntu/Windows × Python 3.11/3.12 全绿，Dependency security run 17 也通过；本机 Python App Execution Alias 无法启动，未将本地命令算作通过。下一窗口只需复核文档提交 CI、处理有效审查意见并交 Lan 安排合并；不要申请 Claude 审查或自行合并。
 

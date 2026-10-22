@@ -197,12 +197,15 @@ class MCP:
         with self.state_lock:
             if self.closed or not self.thread.is_alive():
                 raise MemoryToolError('closed')
+            # Every request ahead is bounded by _serve's 200-second job timeout.
+            # Include one possible in-flight job and this request's own window.
+            wait_timeout = (self.requests.qsize() + 2) * 210
             try:
                 self.loop.call_soon_threadsafe(self.requests.put_nowait, (name, args, result))
             except RuntimeError as exc:
                 raise MemoryToolError('closed') from exc
         try:
-            return result.result(timeout=210)
+            return result.result(timeout=wait_timeout)
         except TimeoutError as exc:
             raise MemoryToolError('closed' if result.cancel() else 'timeout') from exc
 
@@ -268,8 +271,18 @@ def open_ombre(root, cfg, *, data_root=None, api_key_overrides=None):
         rate = Decimal(str(settings['input_cny_per_million']))
         if not rate.is_finite() or rate < 0:
             raise ValueError('invalid embedding price')
+        api_key_overrides = api_key_overrides or {}
+        local_keys = None
+        needs_local_embed = (settings.get('embedding_enabled', True)
+                             and 'OMBRE_EMBED_API_KEY' not in api_key_overrides)
+        needs_local_model = (ombre_model_on(cfg)
+                             and 'OMBRE_COMPRESS_API_KEY' not in api_key_overrides)
+        if needs_local_embed or needs_local_model:
+            local_keys = dotenv_values(root / '.env', interpolate=False,
+                                       encoding='utf-8-sig')
         if settings.get('embedding_enabled', True):
-            key = dotenv_values(root / '.env', interpolate=False, encoding='utf-8-sig').get('EMBED_API_KEY')
+            key = api_key_overrides.get('OMBRE_EMBED_API_KEY',
+                                        (local_keys or {}).get('EMBED_API_KEY'))
             if not key or not key.strip():
                 raise UserError('本机 .env 缺少 EMBED_API_KEY，请填写后重开。')
         vault = vault_path(data_root if data_root is not None else root / 'data', cfg.id)
@@ -279,8 +292,8 @@ def open_ombre(root, cfg, *, data_root=None, api_key_overrides=None):
                         'import jieba, rank_bm25; from mcp.client.streamable_http import streamablehttp_client'],
                        check=True, capture_output=True, timeout=20)
         if ombre_model_on(cfg):
-            model_key = dotenv_values(root / '.env', interpolate=False,
-                                      encoding='utf-8-sig').get(cfg.provider['api_key_env'])
+            model_key = api_key_overrides.get('OMBRE_COMPRESS_API_KEY',
+                (local_keys or {}).get(cfg.provider['api_key_env']))
             if not model_key or not model_key.strip():
                 raise UserError('本机 .env 缺少聊天模型的 API Key（记忆打标和合并要用），请填写后重开。')
         port, token, resident = start_or_connect(

@@ -4,7 +4,7 @@
 
 ## 当前目标与现状
 
-- **060 Ombre 运行期生命周期与安全恢复：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，分支 `ticket/060-ombre-runtime-recovery`。运行期恢复复用现有 MCP 单线程队列与 resident/每角色 vault 锁；恢复前交叉验证本角色进程元数据、端口、锁和 MCP token，并要求 MCP 初始化、核心工具列表及只读 `pulse` 成功。每个请求最多一次恢复、每个 MCP 生命周期最多两次；恢复失败有界并写安全阶段诊断。`hold`、`breath_search` 和其他非 `pulse` 调用不会重放；确认响应丢失后即使恢复成功仍返回结果不明。固定 Ombre 3.6.14 临时 vault 的真实子进程终止、并发恢复、真实 `breath_search`、真实 `hold` 接受后丢失回执并重启不重放全部通过；完整离线套件 332 项通过、3 项跳过，真实生命周期集成 1 项通过。当前未提交；下一步最终复核、提交并推送 PR。Lan 的 Windows 体验验收待进行；GitHub CI 尚未触发/查看。
+- **060 Ombre 运行期生命周期与安全恢复：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，分支 `ticket/060-ombre-runtime-recovery`。运行期恢复复用现有 MCP 单线程队列与 resident/每角色 vault 锁；恢复前交叉验证本角色进程元数据、端口、锁和 MCP token，并要求 MCP 初始化、核心工具列表及只读 `pulse` 成功。每个请求最多一次恢复、每个 MCP 生命周期最多两次；恢复失败有界并写安全阶段诊断。`hold`、`breath_search` 和其他非 `pulse` 调用不会重放；确认响应丢失后即使恢复成功仍返回结果不明。固定 Ombre 3.6.14 临时 vault 的真实子进程终止、并发恢复、真实 `breath_search`、真实 `hold` 接受后丢失回执并重启不重放全部通过；完整离线套件 332 项通过、3 项跳过，真实生命周期集成 1 项通过。PR #96 已创建；当前修复审查确认的取消传播、旧 host 锁释放等待、隔离凭据预检和排队等待边界，并补虚构回归；Ombre resident 与 MCP recovery 定向回归 24 项已通过（Python 3.12），补丁格式检查通过；下一步推送同一 PR。GitHub CI 与 Lan 的 Windows 体验验收待后续确认。
 
 - **058 记忆检索分支隔离与安全诊断：** PR #95 已合入 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。实际症状只证明 Ombre MCP 连接/服务路径故障，不证明 embedding、供应商、某条记忆或数据损坏；没有读取私人诊断、记忆、查询、密钥或调用模型。该 PR 为检索失败隔离和安全诊断，不实现运行期进程恢复。其余实现和验收边界以 PR #95 为准。
 

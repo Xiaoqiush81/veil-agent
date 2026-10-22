@@ -14,6 +14,7 @@ from urllib.request import urlopen
 PINNED_OMBRE = '115d831d979bf67efc7150f976e2cb34c333c935'
 STARTUP_WAIT = 90
 MCP_PROBE_WAIT = 15
+RESIDENT_CLEANUP_WAIT = 5
 
 
 class ResidentError(RuntimeError):
@@ -160,7 +161,7 @@ def _mcp_probe(port, token):
                             raise ResidentError('readonly_tool')
         except ResidentError:
             raise
-        except BaseException as exc:
+        except Exception as exc:
             # Preserve only a safe stage; callers must never log transport text or headers.
             pending, names, statuses = [exc], set(), set()
             resident_stage = None
@@ -264,10 +265,42 @@ class ResidentProcess:
                     return {'exit_code': None, 'state': 'already_healthy'}
                 except ResidentError:
                     exit_code = self._stop_owned()
+            elif self._wait_for_adopted_host(self.restart_args['probe'][0]):
+                return {'exit_code': None, 'state': 'already_healthy'}
             port, token, replacement = start_or_connect(**self.restart_args['start'])
             self.process, self.host_pid = replacement.process, replacement.host_pid
             self.stop_path = replacement.stop_path
             return {'exit_code': exit_code, 'state': 'restarted'}
+
+    def _wait_for_adopted_host(self, port):
+        """Wait briefly for this adopted host to release its vault lock before replacement."""
+        if not self.host_pid:
+            return False
+        state_path = self.private / 'ombre.process.json'
+        lock_path = self.private / 'ombre.lock'
+
+        def owns_lock():
+            try:
+                state = json.loads(state_path.read_text(encoding='utf-8'))
+            except (OSError, ValueError):
+                return False
+            return (state.get('port') == port and state.get('host_pid') == self.host_pid
+                    and _pid_alive(self.host_pid) and _lock_held(lock_path))
+
+        if not owns_lock():
+            return False
+        deadline = time.monotonic() + RESIDENT_CLEANUP_WAIT
+        while owns_lock():
+            if _known_resident(self.private, port):
+                try:
+                    _mcp_probe(*self.restart_args['probe'])
+                    return True
+                except ResidentError:
+                    pass
+            if time.monotonic() >= deadline:
+                raise ResidentError('resident_cleanup')
+            time.sleep(0.1)
+        return False
 
 
     def _stop_owned(self):
