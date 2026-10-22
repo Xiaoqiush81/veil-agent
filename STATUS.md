@@ -4,14 +4,15 @@
 
 ## 当前目标与现状
 
-- **067 能力变化通知可靠交付：** 分支 `ticket/067-capability-notice-delivery`，PR #102，基于 main `2f97bc21422562b8ff4fd3a8e9e39af72019ea13`。已用假模型复现旧实现把中文页面事件与英文简略模型消息分开的错误；现在会以同一份完整英文正文主动交付给 Peter，并按日期保存为双方同看的能力记录。页面不自动弹出通知，只提供“能力记录”按钮。当前等待 PR 最新提交的 CI 与 Cubic 审查。
+- **067 能力变化通知可靠交付：** PR #102 已于 `12fdb3586f91614cb38a0144344aebedda04d513` 合并；GitHub CI 通过，Lan 的 Windows 实际体验验收仍待执行。
+- **068 Windows 真实运行验证：** PR #104 仍在审，基于 main `12fdb3586f91614cb38a0144344aebedda04d513`；隔离虚构角色的 Windows 验证不能代替真实聊天、记忆读写或 Lan 体验验收。
+- **069 breath_search 失败阶段诊断：** 分支 `ticket/069-breath-search-diagnostics`，基于 main `12fdb3586f91614cb38a0144344aebedda04d513`。为避免重放未确认的检索，MCP 会返回 `MemoryToolError/unknown`，但此前会丢失安全失败阶段；现以固定的 HTTP、MCP 初始化、工具执行或恢复阶段记录在角色私有诊断中，聊天提示相同且不含私人内容。
 
 ## 下一步
 
-核对 PR #102 最新提交的 CI 与 Cubic，处理实质意见后按实际分支保护合并。
+工单 069：运行完整离线回归，推 PR 并核对 Cubic 与最新 CI；合并前不宣称真实 Windows 聊天验收已经完成。
 
 ## Lan 的体验验收
 
-1. 给 Peter 增加 `lab_file_digest` 与 `move_lab_file`，点击“能力记录”，确认有带日期的英文完整更新。
-2. 问他 “Did you get the update about your new tools?”；确认他无需解释即可说明两项工具和权限限制。
-3. 重启后再问一次，确认 Peter 仍能说明记录中的更新。
+1. **067 待验收：** 给 Peter 增加 `lab_file_digest` 与 `move_lab_file`，确认面板和 Peter 收到同一完整英文更新，之后多轮不重复。
+2. **069 待验收：** 正常连续与 Peter 聊天并询问已记住的事项，确认不会再出现不含阶段的检索失败；若出现检索故障，保留角色私有诊断供 agent 判断，勿发送聊天或记忆正文。
