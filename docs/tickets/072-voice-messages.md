@@ -20,7 +20,7 @@ Lan 在网页里按住麦克风说话，松开就作为一条语音消息发给 
 
 1. 输入框旁加“按住说话”按钮（鼠标按住或空格长按），松开即停止录音；录音中显示时长，最长 120 秒自动结束；按住时移出按钮可取消。
 2. 录音存到 `data/peter/media/`；本地服务调用 SenseVoiceSmall 识别。`chat.jsonl` 这条 user 记录存录音相对路径和识别文字。
-3. 发给模型的内容是 `[voice message] <识别文字>`，只此一个事实标记，不加任何风格或语言提示。
+3. 发给模型的内容是 `[voice message] <识别文字>`，只此一个事实标记，不加任何风格或语言提示。`self_facts` 的 “You have no voice.” 说的是 Peter 不能说话，与他收到转写文字不矛盾，本单不改它（073 再改）。
 4. 气泡显示播放按钮和识别文字；刷新、重启后仍可回放。
 5. 识别失败（无网、key 错、没识别出字）：录音保留在气泡里，显示中文原因和“重试识别”，不自动发给 Peter，不自动重试。
 6. 能力通知：按现有机制给 Peter 一次性英文通知并写入 `capability_history`，例如 “Lan can now send you voice messages; you receive them as [voice message] followed by the transcript.”

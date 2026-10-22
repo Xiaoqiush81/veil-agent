@@ -20,7 +20,7 @@ Lan 在网页聊天里选一张图片（可附一句话）发给 Peter，Peter �
 
 1. 网页输入框旁加“图片”按钮，也支持粘贴/拖入图片。发送前显示缩略图，可取消。浏览器端把长边缩到 ≤2048px、转 JPEG，单张 ≤5MB；一次一张。现有 `/api/send` 的 `MAX_BODY = 200_000` 放不下图片：另设本地图片上传接口（限 token、限大小、只收栅格图），或相应扩大限制。
 2. 图片存到角色目录 `data/peter/media/`（文件名含日期和随机 id），`chat.jsonl` 的这条 user 记录只存相对路径和 Lan 打的字，不存 base64。
-3. 发给模型时：只有最新一个带图回合附真实图片；其余带图回合只发英文占位 `[Lan sent a photo]`（加上她打的字）。不往 system 或每轮上下文里加任何说明。
+3. 发给模型时：只有最新一个带图回合附真实图片；其余带图回合只发英文占位 `[Lan sent a photo]`（加上她打的字）。不往 system 或每轮上下文里加任何说明。`self_facts` 末尾有 “Unlisted abilities are unavailable.”，若真实测试中 Peter 因此说自己看不到图，只在能力事实里如实补一句可以看 Lan 发的图片，不加别的。
 4. 网页历史（含刷新、重启后）在气泡里显示这张图。
 5. 图片读不到或模型报错时：这条消息照常保留，页面给出清楚的中文提示，不自动重发。
 6. 能力通知：按 067/#109 现有机制给 Peter 一次性英文通知并写入 `capability_history`，内容只说事实，例如 “Lan can now send you photos in chat; you see the newest one directly. Older photos appear as [Lan sent a photo].” 不加每轮提示，不写风格要求。
