@@ -1,6 +1,6 @@
 # 交接
 
-- 2026-10-22 Codex：工单 061 / PR #97，分支 `ticket/061-lab-archive`。Cubic 最后一条评论指出竞态测试未调用实际原子无覆盖操作，已修正为在目标竞态出现后调用真实 `_rename_noreplace(src, dst)` 并检查源和目标内容。已将最新 main `b50230e` 合入；解决 `STATUS.md` / `HANDOFF.md` 冲突时保留 main 的 060 记录，并补入 061 报告。上一 head `25a4a71` 的 Tests #866 与 Dependency security #35 均通过；当前修改的 CI 和 Cubic 复审待检查。Python `py.exe` App Execution Alias 仍无法启动，未运行最新本机回归；Lan 的 Windows 归档、恢复、冲突保护、成长日记边界及重启体验仍待验收。下一步检查当前 head CI 和复审，满足条件后合并 PR #97，再请 Lan 按 STATUS 验收；此单完成后排查 Python 启动故障。
+- 2026-10-22 Codex：工单 061 / PR #97，分支 `ticket/061-lab-archive`。Cubic 全部意见均已修复、回帖并解决；最后一条竞态回归在目标出现后调用真实 `_rename_noreplace(src, dst)`，确认源与目标数据完整。已将最新 main `b50230e` 合入，并解决 STATUS/HANDOFF 文档冲突，保留 060 已合并信息。代码 head `ece9627` 的 Tests #869（Windows/Linux × Python 3.11/3.12）和 Dependency security #36 均通过；STATUS/HANDOFF 本次报告更新后，先检查新 head CI，再满足条件时合并 PR #97。Python `py.exe` App Execution Alias 仍无法启动，最后一次本机回归未运行；Lan 的 Windows 归档、恢复、冲突保护、成长日记边界及重启体验仍待验收。本单合并后排查 Python 启动故障。
 
 - 2026-10-22 Codex：060（PR #96）已合入 main `b50230e`；运行期 MCP 安全恢复已上线，Lan 的 Windows 体验验收仍待进行。
 

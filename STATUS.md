@@ -1,10 +1,10 @@
 # 当前状态
 
-更新：2026-10-22 05:52 UTC · Codex。060（PR #96）已合入 main `b50230e`；061（PR #97）正在处理最后一条 Cubic 测试意见并同步最新 main；058（PR #95）及更早已合入的工单状态见下文。
+更新：2026-10-22 05:57 UTC · Codex。060（PR #96）已合入 main `b50230e`；061（PR #97）已处理 Cubic 全部意见并同步最新 main，代码 head `ece9627` 的四平台 Tests #869 和 Dependency security #36 已通过；058（PR #95）及更早已合入的工单状态见下文。
 
 ## 当前目标与现状
 
-- **061 Peter Lab 文件归档：** 分支 `ticket/061-lab-archive`，PR #97。只允许普通 lab 文件在工作目录与 `lab/archive/` 之间移动；程序校验路径、文件身份、长度与 SHA-256，拒绝冲突、删除、lab 外路径、链接及成长日记移动。Cubic 的大文件核验、POSIX 并发替换、硬链接回归均已修复；最后一条评论指出竞态测试没有真正调用原子无覆盖重命名，已修正为在目标竞态出现后调用真实 `_rename_noreplace`。已同步 main `b50230e`，STATUS/HANDOFF 冲突均保留 main 的 060 信息并补回 061 记录。上一 head `25a4a71` 的 Tests #866 与 Dependency security #35 全绿；最新提交 CI、Cubic 复审及最终合并状态待刷新。定向测试此前 27 项中 26 项通过、1 项因沙箱不支持 hardlink 跳过；当前 Windows `py.exe` App Execution Alias 仍无法启动，未将最新回归或真实 Windows 体验记作通过。下一步检查推送后 CI/复审，满足条件后合并 PR #97，再由 Lan 按验收步骤体验。
+- **061 Peter Lab 文件归档：** 分支 `ticket/061-lab-archive`，PR #97。只允许普通 lab 文件在工作目录与 `lab/archive/` 之间移动；程序校验路径、文件身份、长度与 SHA-256，拒绝冲突、删除、lab 外路径、链接及成长日记移动。Cubic 对大文件核验、POSIX 并发替换、硬链接拒绝、报告状态及原子冲突测试的意见均已修复、回复并解决；竞态回归在创建目标后实际调用 `_rename_noreplace`。分支已同步 main `b50230e`，STATUS/HANDOFF 冲突已解决并保留 main 的 060 合并信息。代码 head `ece9627` 的 Tests #869（Windows/Linux × Python 3.11/3.12）和 Dependency security #36 全绿。此前本机定向测试 27 项中 26 项通过、1 项因沙箱不支持 hardlink 跳过；本机 `py.exe` App Execution Alias 仍无法启动，未运行最后一次本地回归。下一步确认本次报告更新提交后的 CI，然后合并 PR #97；Lan 的 Windows 归档、恢复、冲突保护、成长日记边界及重启体验仍待验收。
 
 - **060 Ombre 运行期生命周期与安全恢复：** PR #96 已合入 main `b50230e`。能力与自动验证已入 main，Lan 的 Windows 体验验收仍待进行。
 
