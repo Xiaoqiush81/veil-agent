@@ -498,6 +498,35 @@ class FilesystemTools:
             from veil_agent import UserError
             raise UserError('长期任务能力通知无法安全保存，工具已停止；请保留 data 文件夹。') from exc
 
+    @capability_transaction
+    def announce_photo_input(self):
+        if getattr(self, 'cap_path', None) is None:
+            return
+        try:
+            row = json.loads(self.cap_path.read_text(encoding='utf-8')) if self.cap_path.exists() else {}
+            if not isinstance(row, dict):
+                raise ValueError('invalid capability record')
+            if row.get('photo_input_announced'):
+                self.capability_event = row.get('pending_event')
+                self.capability_event_model = row.get('pending_event_model')
+                return
+            event = ('Capability update: Lan can now send you photos in chat; you see the newest one '
+                     'directly. Older photos appear as [Lan sent a photo].')
+            previous_event = row.get('pending_event')
+            if isinstance(previous_event, str) and previous_event and event not in previous_event:
+                event = previous_event + '\n' + event
+            row['photo_input_announced'] = True
+            row['pending_event'] = event
+            row['pending_event_model'] = event
+            self._record_update(row, event)
+            save_capabilities(self.cap_path, row)
+            self.capability_event = event
+            self.capability_event_model = event
+        except Exception as exc:
+            self.enabled = False
+            from veil_agent import UserError
+            raise UserError('图片能力通知无法安全保存，工具已停止；请保留 data 文件夹。') from exc
+
     def _description(self, names):
         if not names:
             return 'You currently have no tools. '
