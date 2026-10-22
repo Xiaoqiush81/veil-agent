@@ -4,6 +4,7 @@ import hashlib
 import json
 import ntpath
 import os
+import re
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -13,12 +14,12 @@ from veil_agent import UserError, now
 
 TASK_STATUS = ('active', 'paused', 'blocked', 'completed')
 SIDE_EFFECT_TOOLS = {
-    'write_file', 'append_file', 'grant_append', 'create_directory', 'hold', 'trace',
+    'write_file', 'append_file', 'grant_append', 'create_directory', 'move_lab_file', 'hold', 'trace',
     'letter_write', 'letter_lock_update', 'anchor', 'release', 'plan',
 }
 READ_ONLY_TOOLS = {
     'list_directory', 'directory_tree', 'read_text_file', 'read_multiple_files',
-    'get_file_info', 'search_files', 'list_directory_with_sizes', 'breath_search',
+    'get_file_info', 'search_files', 'list_directory_with_sizes', 'lab_file_digest', 'breath_search',
     'dream', 'letter_read', 'memory_history', 'memory_catalog', 'memory_read', 'pulse',
 }
 MAX_PROGRESS_ITEMS = 40
@@ -33,7 +34,8 @@ TASK_UPDATE_TOOL = SimpleNamespace(name='long_task_update', description=(
     'an unfinished task cannot be overwritten. Use action=update with its exact task_id to append '
     'confirmed progress and evidence, set the next step, pause, mark a blocker, or mark the whole goal '
     'completed. A session ending or reaching a tool limit is not task completion. If pending_action exists, '
-    'first inspect the exact target using read_text_file; for file writes the program checks actual content against '
+    'first inspect the exact target using read_text_file; for lab moves use lab_file_digest when the file may exceed the read limit. '
+    'For file writes and lab moves the program checks actual content against '
     'the saved operation effect. Resolve only with the pending operation_id shown by long_task_status and after '
     'the program records a matching read. If the effect cannot be confirmed, mark the task blocked and do not repeat it. '
     'This state does not grant file or memory permissions.'), inputSchema={
@@ -119,17 +121,27 @@ class LongTaskStore:
             return False
         if value['pending_action'] is not None:
             pending = value['pending_action']
+            effect = pending.get('expected_effect') if isinstance(pending, dict) else None
+            if effect is not None:
+                incomplete_move_effect = (
+                    pending.get('tool') == 'move_lab_file'
+                    and isinstance(effect, dict)
+                    and effect.get('kind') == 'exact'
+                    and effect.get('sha256') is None
+                    and effect.get('byte_length') is None)
+                valid_effect = (
+                    isinstance(effect, dict)
+                    and effect.get('kind') in ('exact', 'suffix', 'memory_body')
+                    and isinstance(effect.get('sha256'), str)
+                    and type(effect.get('byte_length')) is int
+                    and effect['byte_length'] >= 0)
+                if not (valid_effect or incomplete_move_effect):
+                    return False
             if (not isinstance(pending, dict)
                     or not all(isinstance(pending.get(key), str)
                                for key in ('started_at', 'tool', 'target'))
                     or ('operation_id' in pending and not isinstance(pending['operation_id'], str))
                     or ('normalized_target' in pending and not isinstance(pending['normalized_target'], str))
-                    or ('expected_effect' in pending and pending['expected_effect'] is not None and
-                        (not isinstance(pending['expected_effect'], dict) or
-                         pending['expected_effect'].get('kind') not in ('exact', 'suffix', 'memory_body') or
-                         not isinstance(pending['expected_effect'].get('sha256'), str) or
-                         type(pending['expected_effect'].get('byte_length')) is not int or
-                         pending['expected_effect']['byte_length'] < 0))
                     or ('verified_by' in pending and not isinstance(pending['verified_by'], str))
                     or ('verified_sha256' in pending and not isinstance(pending['verified_sha256'], str))
                     or ('state' in pending and not isinstance(pending['state'], str))
@@ -348,10 +360,20 @@ class LongTaskStore:
             memory_id = args.get('memory_id')
             if isinstance(memory_id, str) and memory_id.strip():
                 return memory_id
+        if name == 'move_lab_file' and isinstance(args, dict):
+            destination = args.get('destination')
+            if isinstance(destination, str) and destination.strip():
+                return destination
         return fallback
 
     @staticmethod
     def _expected_effect(name, args):
+        if name == 'move_lab_file' and isinstance(args, dict):
+            if all(isinstance(args.get(key), str) for key in ('source', 'destination')):
+                # The successful move result carries the verified destination digest.
+                # If the process stops before persisting that result, recovery fails closed.
+                return {'kind': 'exact', 'sha256': None, 'byte_length': None}
+            return None
         if name not in ('write_file', 'append_file', 'trace') or not isinstance(args, dict):
             return None
         content = args.get('content')
@@ -383,7 +405,7 @@ class LongTaskStore:
                 return None, False
             task['pending_action'] = {'operation_id': uuid.uuid4().hex, 'started_at': now(),
                 'tool': name, 'target': str(target)[:240], 'normalized_target': self._normalized_target(target),
-                'expected_effect': self._expected_effect(name, args)}
+                'expected_effect': self._expected_effect(name, args), 'verified_in_step': None}
             task['updated_at'] = now()
             self._save(task)
             return None, True
@@ -393,7 +415,7 @@ class LongTaskStore:
         blocked, _ = self.before_tool(name, target, autonomy=True)
         return blocked
 
-    def finish_tool(self, name, target, state):
+    def finish_tool(self, name, target, state, result=None):
         with self.store.mutex:
             task = self._read_file()
             if not task or task['status'] != 'active':
@@ -413,6 +435,12 @@ class LongTaskStore:
             if state == '成功':
                 pending['state'] = '成功，需核实'
                 pending['verified_in_step'] = None
+                effect = pending.get('expected_effect')
+                if name == 'move_lab_file' and isinstance(effect, dict):
+                    match = re.search(r'\((\d+) bytes, SHA-256 ([0-9a-f]{64})\)', result or '')
+                    if match:
+                        effect['byte_length'] = int(match.group(1))
+                        effect['sha256'] = match.group(2)
             elif state == '被拒绝':
                 task['pending_action'] = None
             else:
@@ -438,9 +466,13 @@ class LongTaskStore:
             content = result.encode('utf-8')
             effect = pending.get('expected_effect')
             if effect is None:
-                if pending['tool'] in ('write_file', 'append_file') or not result.strip():
+                if pending['tool'] in ('write_file', 'append_file', 'move_lab_file') or not result.strip():
                     return
             else:
+                if pending['tool'] == 'move_lab_file' and (
+                        not isinstance(effect.get('sha256'), str) or
+                        not isinstance(effect.get('byte_length'), int)):
+                    return
                 if effect['kind'] == 'memory_body':
                     if name != 'memory_read':
                         return
@@ -461,17 +493,29 @@ class LongTaskStore:
                     if hashlib.sha256(actual).hexdigest() != effect['sha256']:
                         return
                 else:
-                    if name != 'read_text_file':
-                        return
-                    if effect['kind'] == 'suffix' and pending.get('state') != '成功，需核实':
-                        return
-                    length = effect['byte_length']
-                    if len(content) < length:
-                        return
-                    actual = content if effect['kind'] == 'exact' else content[-length:] if length else b''
-                    digest = hashlib.sha256(actual).hexdigest()
-                    if (effect['kind'] == 'exact' and len(content) != length) or digest != effect['sha256']:
-                        return
+                    if pending['tool'] == 'move_lab_file' and name == 'lab_file_digest':
+                        try:
+                            actual = json.loads(result)
+                        except (TypeError, ValueError):
+                            return
+                        if (not isinstance(actual, dict)
+                                or self._normalized_target(actual.get('path', '')) != expected
+                                or type(actual.get('byte_length')) is not int
+                                or actual['byte_length'] != effect['byte_length']
+                                or actual.get('sha256') != effect['sha256']):
+                            return
+                    else:
+                        if name != 'read_text_file':
+                            return
+                        if effect['kind'] == 'suffix' and pending.get('state') != '成功，需核实':
+                            return
+                        length = effect['byte_length']
+                        if len(content) < length:
+                            return
+                        actual = content if effect['kind'] == 'exact' else content[-length:] if length else b''
+                        digest = hashlib.sha256(actual).hexdigest()
+                        if (effect['kind'] == 'exact' and len(content) != length) or digest != effect['sha256']:
+                            return
             pending['verified_in_step'] = self.current_tool_step
             pending['verified_by'] = name
             pending['verified_sha256'] = hashlib.sha256(content).hexdigest()

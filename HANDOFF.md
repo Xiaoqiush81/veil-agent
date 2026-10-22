@@ -1,6 +1,8 @@
 # 交接
 
-- 2026-10-22 Codex：工单 060，PR #96，分支 `ticket/060-ombre-runtime-recovery`，基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。按 review 修复 `_mcp_probe()` 的取消传播及嵌套阶段保留、被接管 Ombre host 锁释放等待、`open_ombre()` 隔离凭据预检和 MCP 排队调用的有界等待，并补虚构回归。Ombre resident 与 MCP recovery 定向回归 24 项已通过（Python 3.12），`git diff --check` 通过；当前下一步：提交并推送现有 PR #96，不新开 PR、不合并、不等待机器人。GitHub CI 与真实 Windows 体验仍待后续确认。
+- 2026-10-22 Codex：工单 061 / PR #97，分支 `ticket/061-lab-archive`。Cubic 全部意见均已修复、回帖并解决；最后一条竞态回归在目标出现后调用真实 `_rename_noreplace(src, dst)`，确认源与目标数据完整。已将最新 main `b50230e` 合入，并解决 STATUS/HANDOFF 文档冲突，保留 060 已合并信息。代码 head `ece9627` 的 Tests #869（Windows/Linux × Python 3.11/3.12）和 Dependency security #36 均通过；STATUS/HANDOFF 本次报告更新后，先检查新 head CI，再满足条件时合并 PR #97。Python `py.exe` App Execution Alias 仍无法启动，最后一次本机回归未运行；Lan 的 Windows 归档、恢复、冲突保护、成长日记边界及重启体验仍待验收。本单合并后排查 Python 启动故障。
+
+- 2026-10-22 Codex：060（PR #96）已合入 main `b50230e`；运行期 MCP 安全恢复已上线，Lan 的 Windows 体验验收仍待进行。
 
 - 2026-10-22 Codex：工单 054、PR #91，分支 `ticket/054-long-task-checkpoint-recovery`。CI 首轮发现 `trace` 开始时保存 memory ID、结束时却传展示标题给 `finish_tool`，严格目标匹配因此拒绝；修复为开始、结束和 `memory_read` 核实均传 memory ID，未放宽任何匹配。带 `content` 的 trace 仍需同 ID、完整且正文哈希匹配；错误内容、分页或未知结果保持 pending。40 条进度已满时仍可直接 `resolve_pending`，不新增第 41 条普通进度。修复提交 `8da093b` 的 Tests run 824 已在 Ubuntu/Windows × Python 3.11/3.12 全绿，Dependency security run 17 也通过；本机 Python App Execution Alias 无法启动，未将本地命令算作通过。下一窗口只需复核文档提交 CI、处理有效审查意见并交 Lan 安排合并；不要申请 Claude 审查或自行合并。
 

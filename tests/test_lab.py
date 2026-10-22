@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import subprocess
@@ -7,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from tools_agent import ALLOW, ASK, DENY, LAB_ONLY, FilesystemTools, permitted_tools
+from tools_agent import ALLOW, ASK, DENY, LAB_ONLY, FilesystemTools, _rename_noreplace, permitted_tools
 from veil_agent import Budget, Chat, Store, UserError, load_character
 
 
@@ -57,6 +58,10 @@ persistent_append_file = "growth-journal.md"
             args['content'] = content
         return (tools or self.tools).invoke(name, args,
             self.no_approval if approval is None else approval)
+
+    def move(self, source, destination, tools=None):
+        return (tools or self.tools).invoke('move_lab_file',
+            {'source': source, 'destination': destination}, self.no_approval)
 
     def test_create_directories_files_append_and_restart_without_approval(self):
         self.assertEqual(self.call('create_directory', 'lab/research/notes')[1], '成功')
@@ -153,6 +158,136 @@ persistent_append_file = "growth-journal.md"
         self.assertEqual(self.call('write_file', 'growth-journal.md', 'overwrite')[1], '被拒绝')
         for name in ('edit_file', 'move_file', 'delete_file', 'execute_script'):
             self.assertEqual(self.call(name, 'lab/notes.md', 'bad')[1], '被拒绝')
+        self.assertEqual(self.move('growth-journal.md', 'lab/archive/growth-journal.md')[1], '被拒绝')
+        self.assertEqual(self.move('lab/notes.md', 'archive/notes.md')[1], '被拒绝')
+        self.assertEqual(journal.read_bytes(), b'original journal\nsecond')
+
+    def test_archive_and_restore_preserve_complete_file_and_survive_reopen(self):
+        self.call('create_directory', 'lab/play')
+        original = b'<!doctype html>\r\n<!-- old version -->\x00\xff\r\n'
+        source = self.lab / 'play/find-the-bug-v1.html'
+        source.write_bytes(original)
+        result = self.move('lab/play/find-the-bug-v1.html',
+                           'lab/archive/play/find-the-bug-v1.html')
+        self.assertEqual(result[1], '成功', result)
+        self.assertIn('SHA-256', result[0])
+        archived = self.lab / 'archive/play/find-the-bug-v1.html'
+        self.assertFalse(source.exists())
+        self.assertEqual(archived.read_bytes(), original)
+        reopened = self.open_tools()
+        result = self.move('lab/archive/play/find-the-bug-v1.html',
+                           'lab/play/recovered-v1.html', tools=reopened)
+        self.assertEqual(result[1], '成功', result)
+        self.assertFalse(archived.exists())
+        self.assertEqual((self.lab / 'play/recovered-v1.html').read_bytes(), original)
+        self.no_approval.assert_not_called()
+
+    def test_move_conflict_and_failed_atomic_move_keep_source_and_target_intact(self):
+        source = self.lab / 'play.md'
+        source.write_bytes(b'complete original')
+        target = self.lab / 'archive/play.md'
+        target.parent.mkdir()
+        target.write_bytes(b'existing destination')
+        result = self.move('lab/play.md', 'lab/archive/play.md')
+        self.assertEqual(result[1], '被拒绝', result)
+        self.assertEqual(source.read_bytes(), b'complete original')
+        self.assertEqual(target.read_bytes(), b'existing destination')
+
+        target.unlink()
+        atomic_rename = _rename_noreplace
+        def create_racing_destination(src, dst, *args, **kwargs):
+            Path(dst).write_bytes(b'racing destination')
+            return atomic_rename(src, dst)
+        with patch('tools_agent._rename_noreplace', side_effect=create_racing_destination):
+            result = self.move('lab/play.md', 'lab/archive/play.md')
+        self.assertEqual(result[1], '被拒绝', result)
+        self.assertEqual(source.read_bytes(), b'complete original')
+        self.assertEqual(target.read_bytes(), b'racing destination')
+
+        target.unlink()
+        with patch('tools_agent._rename_noreplace', side_effect=OSError('simulated move failure')):
+            result = self.move('lab/play.md', 'lab/archive/play.md')
+        self.assertEqual(result[1], '出错', result)
+        self.assertEqual(source.read_bytes(), b'complete original')
+        self.assertFalse(target.exists())
+
+    def test_source_replacement_during_move_is_restored_without_loss(self):
+        source = self.lab / 'play.md'
+        source.write_bytes(b'original source')
+        destination = self.lab / 'archive/play.md'
+        calls = 0
+
+        def replace_before_atomic_move(src, dst):
+            nonlocal calls
+            if calls == 0:
+                Path(src).unlink()
+                Path(src).write_bytes(b'concurrent replacement')
+            calls += 1
+            return _rename_noreplace(src, dst)
+
+        with patch('tools_agent._rename_noreplace', side_effect=replace_before_atomic_move):
+            result = self.move('lab/play.md', 'lab/archive/play.md')
+        self.assertEqual(result[1], '出错', result)
+        self.assertEqual(source.read_bytes(), b'concurrent replacement')
+        self.assertFalse(destination.exists())
+
+    def test_move_rejects_paths_outside_archive_boundary_and_non_regular_files(self):
+        (self.lab / 'play').mkdir()
+        source = self.lab / 'play/item.md'
+        source.write_bytes(b'original')
+        for destination in ('lab/archive/other/item.md', 'lab/other/item.md',
+                            '../outside.md', str(self.tools.workspace / 'outside.md')):
+            result = self.move('lab/play/item.md', destination)
+            self.assertEqual(result[1], '被拒绝', (destination, result))
+            self.assertEqual(source.read_bytes(), b'original')
+        (self.lab / 'play/folder').mkdir()
+        self.assertEqual(self.move('lab/play/folder', 'lab/archive/folder')[1], '被拒绝')
+        try:
+            (self.lab / 'play/link.md').symlink_to(source)
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            self.assertEqual(self.move('lab/play/link.md', 'lab/archive/play/link.md')[1], '被拒绝')
+        self.assertEqual(source.read_bytes(), b'original')
+
+    def test_move_rejects_hardlink_and_preserves_both_names(self):
+        (self.lab / 'play').mkdir()
+        source = self.lab / 'play/source.md'
+        alias = self.lab / 'play/alias.md'
+        source.write_bytes(b'linked original')
+        try:
+            os.link(source, alias)
+        except OSError:
+            self.skipTest('hardlinks unavailable')
+        result = self.move('lab/play/source.md', 'lab/archive/play/source.md')
+        self.assertEqual(result[1], '被拒绝', result)
+        self.assertEqual(source.read_bytes(), b'linked original')
+        self.assertEqual(alias.read_bytes(), b'linked original')
+        self.assertFalse((self.lab / 'archive/play/source.md').exists())
+
+    def test_lab_file_digest_hashes_large_binary_files_in_bounded_chunks(self):
+        content = bytes(range(256)) * 128
+        path = self.lab / 'archive/large.bin'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(content)
+        result, state, _ = self.tools.invoke('lab_file_digest', {'path': 'lab/archive/large.bin'})
+        self.assertEqual(state, '成功', result)
+        self.assertEqual(json.loads(result), {
+            'path': 'lab/archive/large.bin', 'byte_length': len(content),
+            'sha256': hashlib.sha256(content).hexdigest()})
+        denied, state, _ = self.tools.invoke('lab_file_digest', {'path': 'growth-journal.md'})
+        self.assertEqual(state, '被拒绝', denied)
+
+    def test_move_tool_is_lab_only_and_never_exposes_filesystem_server_move(self):
+        names = {tool.name for tool in self.tools.tools}
+        self.assertIn('move_lab_file', names)
+        self.assertIn('lab_file_digest', names)
+        self.assertNotIn('move_file', {item['function']['name']
+                                      for item in permitted_tools(self.tools.tools)})
+        self.cfg.tools['lab'] = False
+        disabled = self.open_tools()
+        self.assertNotIn('move_lab_file', {tool.name for tool in disabled.tools})
+        self.assertEqual(self.move('lab/a.md', 'lab/archive/a.md', tools=disabled)[1], '被拒绝')
 
     def test_hardlink_cannot_use_lab_permission_to_append_journal(self):
         journal = self.tools.workspace / 'growth-journal.md'
@@ -203,7 +338,10 @@ persistent_append_file = "growth-journal.md"
         link = self.lab / 'escape'
         subprocess.run(['cmd', '/c', 'mklink', '/J', str(link), str(self.tools.workspace)],
                        check=True, capture_output=True)
+        (self.lab / 'source.md').write_bytes(b'original')
         self.assertEqual(self.call('write_file', 'lab/escape/journal.md', 'bad')[1], '被拒绝')
+        self.assertEqual(self.move('lab/source.md', 'lab/escape/archive/source.md')[1], '被拒绝')
+        self.assertEqual((self.lab / 'source.md').read_bytes(), b'original')
         self.assertFalse((self.tools.workspace / 'journal.md').exists())
 
     def test_append_replacement_race_is_refused_before_writing(self):

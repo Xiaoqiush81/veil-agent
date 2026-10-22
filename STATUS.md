@@ -1,10 +1,12 @@
 # 当前状态
 
-更新：2026-10-22 · 工单 060 Ombre 运行期生命周期与安全恢复施工中；058（PR #95）已合入 main `560bf60`；057（PR #94）及更早已合并工单状态见下文。
+更新：2026-10-22 05:57 UTC · Codex。060（PR #96）已合入 main `b50230e`；061（PR #97）已处理 Cubic 全部意见并同步最新 main，代码 head `ece9627` 的四平台 Tests #869 和 Dependency security #36 已通过；058（PR #95）及更早已合入的工单状态见下文。
 
 ## 当前目标与现状
 
-- **060 Ombre 运行期生命周期与安全恢复：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，分支 `ticket/060-ombre-runtime-recovery`。运行期恢复复用现有 MCP 单线程队列与 resident/每角色 vault 锁；恢复前交叉验证本角色进程元数据、端口、锁和 MCP token，并要求 MCP 初始化、核心工具列表及只读 `pulse` 成功。每个请求最多一次恢复、每个 MCP 生命周期最多两次；恢复失败有界并写安全阶段诊断。`hold`、`breath_search` 和其他非 `pulse` 调用不会重放；确认响应丢失后即使恢复成功仍返回结果不明。固定 Ombre 3.6.14 临时 vault 的真实子进程终止、并发恢复、真实 `breath_search`、真实 `hold` 接受后丢失回执并重启不重放全部通过；完整离线套件 332 项通过、3 项跳过，真实生命周期集成 1 项通过。PR #96 已创建；当前修复审查确认的取消传播、旧 host 锁释放等待、隔离凭据预检和排队等待边界，并补虚构回归；Ombre resident 与 MCP recovery 定向回归 24 项已通过（Python 3.12），补丁格式检查通过；下一步推送同一 PR。GitHub CI 与 Lan 的 Windows 体验验收待后续确认。
+- **061 Peter Lab 文件归档：** 分支 `ticket/061-lab-archive`，PR #97。只允许普通 lab 文件在工作目录与 `lab/archive/` 之间移动；程序校验路径、文件身份、长度与 SHA-256，拒绝冲突、删除、lab 外路径、链接及成长日记移动。Cubic 对大文件核验、POSIX 并发替换、硬链接拒绝、报告状态及原子冲突测试的意见均已修复、回复并解决；竞态回归在创建目标后实际调用 `_rename_noreplace`。分支已同步 main `b50230e`，STATUS/HANDOFF 冲突已解决并保留 main 的 060 合并信息。代码 head `ece9627` 的 Tests #869（Windows/Linux × Python 3.11/3.12）和 Dependency security #36 全绿。此前本机定向测试 27 项中 26 项通过、1 项因沙箱不支持 hardlink 跳过；本机 `py.exe` App Execution Alias 仍无法启动，未运行最后一次本地回归。下一步确认本次报告更新提交后的 CI，然后合并 PR #97；Lan 的 Windows 归档、恢复、冲突保护、成长日记边界及重启体验仍待验收。
+
+- **060 Ombre 运行期生命周期与安全恢复：** PR #96 已合入 main `b50230e`。能力与自动验证已入 main，Lan 的 Windows 体验验收仍待进行。
 
 - **058 记忆检索分支隔离与安全诊断：** PR #95 已合入 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`。实际症状只证明 Ombre MCP 连接/服务路径故障，不证明 embedding、供应商、某条记忆或数据损坏；没有读取私人诊断、记忆、查询、密钥或调用模型。该 PR 为检索失败隔离和安全诊断，不实现运行期进程恢复。其余实现和验收边界以 PR #95 为准。
 

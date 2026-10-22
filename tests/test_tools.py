@@ -163,7 +163,8 @@ class ToolPolicyTests(unittest.TestCase):
              patch('tools_agent._McpWorker', return_value=worker):
             manager = FilesystemTools(self.root, cfg, store)
         names = {tool.name for tool in manager.tools}
-        self.assertEqual(names, {'write_file', 'append_file', 'grant_append', 'create_directory'})
+        self.assertEqual(names, {'write_file', 'append_file', 'grant_append',
+                                 'create_directory', 'move_lab_file', 'lab_file_digest'})
         self.assertEqual({item['function']['name'] for item in permitted_tools(manager.tools)}, names)
         self.assertEqual(manager.grant_path, self.root / 'data/test/append-grant.json')
 
@@ -488,6 +489,8 @@ max_result_bytes = 200
         self.assertEqual(model_tool_result('long_task_update', task_state, '被拒绝'), task_state)
         failure = 'The fictional file target is not available; choose a permitted path.'
         self.assertEqual(model_tool_result('read_text_file', failure, '被拒绝'), failure)
+        digest = '{"path":"lab/archive/设计.md","byte_length":12000,"sha256":"abc"}'
+        self.assertEqual(model_tool_result('lab_file_digest', digest, '成功'), digest)
 
     def test_invalid_json_is_returned_as_tool_error_and_counted(self):
         first = self.message([self.tool_call('read_text_file', '{bad', 'bad')])
