@@ -6,8 +6,9 @@
 - PR #109：`CURRENT CAPABILITIES` 和 `CAPABILITY RECORD` 不再每轮注入模型上下文。Lan 的原意是“加了新东西就通知他一次，他自己知道去哪查”：一次性通知保留（#102），新增只读工具 `capability_history` 返回带时间戳的记录。不要再往每轮上下文里加能力说明或清单；能力面板仍向 Lan 显示快照与记录，但能力是做给 Peter 的，Peter 必须能自己查到。
 - 开发端事实：仓库测试必须用 `.venv` 解释器；系统 Python 缺依赖。main ruleset `VEIL Main Protection` 要求六项检查（Windows/Ubuntu × Python 3.11/3.12、`audit`、`scanner-report-smoke`），不得绕过。
 - Lan 的运行目录只留在 main，更新用 `git pull --ff-only`；Codex 在 `.worktrees/` 工作，不要动运行目录里的未跟踪 `.worktrees/`。
-- 未处理风险：`update-main.cmd` 结束时会切回原分支，Lan 不应再用它更新；Ombre 进程退出原因（退出码 −1）仍未查明。
+- 未处理风险：Ombre 进程退出原因（退出码 −1）仍未查明。
+- 工单 070 分支 `ticket/070-main-updater-stays-main` 基于已合并 #109 的 main `d17cfec`。修复成功更新后又切回旧 ticket 分支的问题；成功路径停在 main，安全检查失败仍回原分支。Windows 隔离 Git 回归已同步该契约，等待 Cubic 与必需 CI。
 
 ## 下一个窗口第一步
 
-读 STATUS 的验收清单，等 Lan 的验收结果；新工单编号从 070 起。
+跟进 070 的 Cubic 与必需 CI；合并后请 Lan 在真实 Windows 运行目录验收更新成功后停在 main。

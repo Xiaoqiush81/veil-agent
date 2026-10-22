@@ -111,6 +111,8 @@ echo.
 echo Update completed successfully:
 git log -1 --oneline
 echo Close Peter using Exit Service, then open start-web.bat again.
+echo This folder will stay on main so Peter starts from the version just updated.
+goto end
 
 :return_to_branch
 if /i not "%CURRENT_BRANCH%"=="main" (

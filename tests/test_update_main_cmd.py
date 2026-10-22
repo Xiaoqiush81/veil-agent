@@ -19,7 +19,7 @@ def _git(repo: Path, *args: str) -> str:
 
 @unittest.skipUnless(os.name == "nt", "Windows command script")
 class UpdateMainCommandTests(unittest.TestCase):
-    def test_updater_recovers_diverged_main_and_returns_to_ticket(self) -> None:
+    def test_updater_recovers_diverged_main_and_stays_on_main(self) -> None:
         with tempfile.TemporaryDirectory(dir=REPO) as temp:
             tmp_path = Path(temp)
             remote = tmp_path / "remote.git"
@@ -86,7 +86,8 @@ class UpdateMainCommandTests(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
-            self.assertEqual(_git(repo, "branch", "--show-current"), "ticket/example")
+            self.assertIn("This folder will stay on main", completed.stdout)
+            self.assertEqual(_git(repo, "branch", "--show-current"), "main")
             self.assertEqual(_git(repo, "rev-parse", "main"), remote_head)
             self.assertEqual(
                 _git(repo, "rev-parse", f"backup/main-before-update-{ticket_head[:12]}"),
@@ -102,5 +103,5 @@ class UpdateMainCommandTests(unittest.TestCase):
                 timeout=30,
             )
             self.assertEqual(repeated.returncode, 0, repeated.stdout + repeated.stderr)
-            self.assertEqual(_git(repo, "branch", "--show-current"), "ticket/example")
+            self.assertEqual(_git(repo, "branch", "--show-current"), "main")
             self.assertEqual(_git(repo, "rev-parse", "main"), remote_head)
