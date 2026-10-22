@@ -874,7 +874,12 @@ class FilesystemServerTests(unittest.TestCase):
             result, state, summary = manager.invoke('list_directory',
                 {'path': str(manager.workspace)})
             no_prompt = Mock(side_effect=AssertionError('lab should not ask'))
-            self.assertEqual(manager.invoke('create_directory', {'path': 'lab/research'}, no_prompt)[1], '成功')
+            created, create_state, create_summary = manager.invoke(
+                'create_directory', {'path': 'lab/research'}, no_prompt)
+            self.assertEqual(create_state, '成功',
+                f'create_directory returned {create_state}: {created}; '
+                f'lab={manager.lab!r}; startup_notice={manager.startup_notice!r}; '
+                f'summary={create_summary!r}')
             self.assertEqual(manager.invoke('write_file',
                 {'path': 'lab/research/v1.md', 'content': 'original'}, no_prompt)[1], '成功')
             self.assertEqual(manager.invoke('append_file',
