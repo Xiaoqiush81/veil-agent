@@ -29,8 +29,9 @@ def vault_path(root, character):
 
 class MemoryToolError(RuntimeError):
     """Safe diagnostic codes, never server text, credentials or memory contents."""
-    def __init__(self, code):
+    def __init__(self, code, *, stage=None):
         self.code = code
+        self.stage = stage if stage is not None else ('mcp_tool' if code == 'tool' else None)
         messages = {
             'connection': 'The memory connection is unavailable; the safe read still failed after reconnect, so try again later.',
             'tool': 'The memory service rejected this tool call; it was not retried.',
@@ -39,6 +40,13 @@ class MemoryToolError(RuntimeError):
             'closed': 'The memory connection is closed; this operation was not submitted.',
         }
         super().__init__(messages[code])
+
+
+class MCPStageError(RuntimeError):
+    """Classify a transport boundary without retaining its private details."""
+    def __init__(self, stage):
+        self.stage = stage
+        super().__init__(stage)
 
 
 class MCP:
@@ -50,6 +58,7 @@ class MCP:
         self.url, self.token = url, token
         self.recovery = recovery
         self.recovery_count = 0
+        self.recovery_streak = 0  # recoveries since the last healthy reply
         self.diagnostic = None
         self.closed = False
         self.state_lock = threading.Lock()
@@ -85,22 +94,75 @@ class MCP:
         from mcp import ClientSession
         from mcp.client.streamable_http import streamablehttp_client
         headers = {'Authorization': f'Bearer {self.token}'}
-        async with streamablehttp_client(self.url, headers=headers) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                yield session
+        try:
+            async with streamablehttp_client(self.url, headers=headers) as (read, write, _):
+                body_error = None
+                try:
+                    async with ClientSession(read, write) as session:
+                        try:
+                            await session.initialize()
+                        except Exception as exc:
+                            raise MCPStageError('mcp_initialize') from exc
+                        try:
+                            yield session
+                        except BaseException as exc:
+                            body_error = exc
+                            raise
+                except MCPStageError:
+                    raise
+                except Exception as exc:
+                    if body_error is not None:
+                        raise body_error
+                    raise MCPStageError('mcp_session') from exc
+        except MCPStageError:
+            raise
+        except Exception as exc:
+            raise MCPStageError('http_session') from exc
+
+    @staticmethod
+    def _never_sent(exc):
+        """True only when the failure was a refused connection, before any request was sent."""
+        seen = set()
+        def refused(error):
+            if error is None or id(error) in seen:
+                return False
+            seen.add(id(error))
+            if isinstance(error, ConnectionRefusedError) or type(error).__name__ == 'ConnectError':
+                return True
+            children = getattr(error, 'exceptions', ())
+            if children:
+                # Every grouped failure must prove non-delivery; a mixed group is uncertain.
+                return all(refused(child) for child in children)
+            return refused(error.__cause__) or refused(error.__context__)
+        return refused(exc)
 
     def _diagnose(self, name, exc, attempt):
         kinds = []
+        stages = []
+        seen = set()
         def visit(error):
+            if id(error) in seen:
+                return
+            seen.add(id(error))
             kinds.append(type(error).__name__)
+            stage = getattr(error, 'stage', None)
+            if stage in {'http_session', 'mcp_session', 'mcp_initialize', 'mcp_tool',
+                         'mcp_verified', 'recovery'}:
+                stages.append(stage)
             for child in getattr(error, 'exceptions', ()):
                 visit(child)
+            if error.__cause__ is not None:
+                visit(error.__cause__)
+            elif error.__context__ is not None:
+                visit(error.__context__)
         visit(exc)
         if self.diagnostic:
             try:
-                self.diagnostic({'code': 'mcp_call', 'tool': name, 'attempt': attempt,
-                                 'error_types': sorted(set(kinds))[:8]})
+                facts = {'code': 'mcp_call', 'tool': name, 'attempt': attempt,
+                         'error_types': sorted(set(kinds))[:8]}
+                if stages:
+                    facts['stage'] = stages[0]
+                self.diagnostic(facts)
             except Exception:
                 pass  # Logging must not mask the tool's safe failure message.
 
@@ -108,7 +170,11 @@ class MCP:
         response = None
         try:
             async with self._session() as session:
-                response = await session.call_tool(name, args)
+                try:
+                    self.active_stage = 'mcp_tool'
+                    response = await session.call_tool(name, args)
+                except Exception as exc:
+                    raise MCPStageError('mcp_tool') from exc
         except Exception as exc:
             if response is None:
                 raise
@@ -119,9 +185,10 @@ class MCP:
         return '\n'.join(c.text for c in response.content if hasattr(c, 'text'))
 
     async def _recover(self, name, attempt):
-        if self.recovery is None or self.recovery_count >= 2:
+        if self.recovery is None or self.recovery_streak >= 2:
             return False
         self.recovery_count += 1
+        self.recovery_streak += 1
         try:
             recovery_result = await asyncio.to_thread(self.recovery)
         except Exception as exc:
@@ -161,12 +228,17 @@ class MCP:
             if not result.set_running_or_notify_cancel():
                 continue
             self.current_result = result
+            self.active_stage = None
             try:
                 async with asyncio.timeout(200):
                     attempts = 2 if name in self.RETRYABLE_READS else 1
-                    for attempt in range(1, attempts + 1):
+                    attempt = 0
+                    resent = False
+                    while attempt < attempts:
+                        attempt += 1
                         try:
                             async with asyncio.timeout(40 if attempts == 2 else 85):
+                                self.active_stage = 'mcp_session'
                                 text = await self._perform(name, args)
                             break
                         except MemoryToolError:
@@ -176,22 +248,34 @@ class MCP:
                             if attempt == attempts and name in self.RETRYABLE_READS:
                                 raise MemoryToolError('connection') from exc
                             restored = await self._recover(name, attempt)
+                            if restored and attempts == 1 and self._never_sent(exc):
+                                # Ombre refused the connection, so this call never
+                                # reached it; after a verified restart it is safe to send once.
+                                attempts = 2
+                                resent = True
+                                continue
                             if attempt == attempts:
-                                raise MemoryToolError('connection' if attempts == 2 else 'unknown') from exc
+                                # A failed resend may have reached Ombre, so its outcome stays unknown.
+                                raise MemoryToolError(
+                                    'connection' if attempts == 2 and not resent else 'unknown',
+                                    stage=('recovery' if self.recovery is not None and not restored
+                                           else getattr(exc, 'stage', None))) from exc
                             if self.recovery is not None and not restored:
-                                raise MemoryToolError('connection') from exc
+                                raise MemoryToolError('connection', stage='recovery') from exc
+                    self.recovery_streak = 0  # A healthy reply restores the recovery allowance.
                     result.set_result(text)
             except TimeoutError as exc:
                 self._diagnose(name, exc, 0)
                 # Inner transport handling already attempted bounded recovery when eligible.
                 # A write timeout stays uncertain and is never replayed.
-                result.set_exception(MemoryToolError('timeout'))
+                result.set_exception(MemoryToolError('timeout', stage=self.active_stage))
             except MemoryToolError as exc:
                 self._diagnose(name, exc, 0)
                 # Do not hand another thread a live coroutine traceback (or its
                 # private transport cause). Consumers may clear its frames.
-                result.set_exception(MemoryToolError(exc.code))
+                result.set_exception(MemoryToolError(exc.code, stage=exc.stage))
             finally:
+                self.active_stage = None
                 self.current_result = None
 
     def call(self, name, args):
@@ -892,6 +976,12 @@ class Memory:
         code = getattr(exc, 'code', None)
         return code if code in {'connection', 'tool', 'unknown', 'timeout', 'closed'} else None
 
+    @staticmethod
+    def safe_error_stage(exc):
+        stage = getattr(exc, 'stage', None)
+        return stage if stage in {'http_session', 'mcp_session', 'mcp_initialize', 'mcp_tool',
+                                  'mcp_verified', 'recovery'} else None
+
     def tool_failure(self, tool, exc):
         """Keep autonomous and interactive tool failures query- and body-free."""
         try:
@@ -909,6 +999,7 @@ class Memory:
         """Record only a stable stage and exception class for automatic recall."""
         error_type = self.safe_error_type(exc)
         error_code = self.safe_error_code(exc)
+        error_stage = self.safe_error_stage(exc)
         try:
             row = {
                 'time': self.budget.clock(), 'code': 'retrieval_failed',
@@ -916,6 +1007,8 @@ class Memory:
             }
             if error_code:
                 row['error_code'] = error_code
+            if error_stage:
+                row['mcp_stage'] = error_stage
             self.store.append(self.diagnostics, row)
         except Exception:
             pass  # A diagnostic write must never make automatic recall unsafe.
@@ -923,7 +1016,8 @@ class Memory:
             'retrieval-failed',
             f'Memory retrieval partly failed at {stage} ({error_type}'
             + (f'/{error_code}' if error_code else '') + '); '
-            'unavailable content was not treated as memory. '
+            + (f'Safe failure stage: {error_stage}. ' if error_stage else '')
+            + 'unavailable content was not treated as memory. '
             'See memory/_agent/diagnostics.jsonl; it contains no chat content or keys.')
 
     def context_visible(self, candidates, *, failure_stage=None):

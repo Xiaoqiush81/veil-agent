@@ -79,9 +79,21 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('hold', {'content': 'fictional'})
         self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(failed.exception.stage, 'mcp_tool')
         self.assertEqual(client.calls, ['hold'])
         self.assertEqual(recovered, ['verified'])
         self.assertEqual(client.call('pulse', {}), 'later read')
+
+    def test_tool_execution_failure_keeps_a_safe_stage_after_unknown_result(self):
+        client = self.backend([ConnectionError('fixture secret')])
+        diagnostics = []
+        client.diagnostic = diagnostics.append
+        with self.assertRaises(MemoryToolError) as failed:
+            client.call('breath_search', {'query': 'fictional'})
+        self.assertEqual((failed.exception.code, failed.exception.stage), ('unknown', 'mcp_tool'))
+        self.assertEqual(diagnostics[0]['stage'], 'mcp_tool')
+        self.assertIn('ConnectionError', diagnostics[0]['error_types'])
+        self.assertNotIn('fixture secret', json.dumps(diagnostics))
 
     def test_concurrent_transport_failures_share_one_recovery_owner(self):
         recovered = []
@@ -101,9 +113,12 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('hold', {'content': 'fictional'})
         self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(failed.exception.stage, 'recovery')
         self.assertEqual(client.calls, ['hold'])
         self.assertNotIn('fixture-secret', json.dumps(diagnostics))
         self.assertEqual(client.recovery_count, 1)
+        recovery = next(row for row in diagnostics if row['code'] == 'recovery_failed')
+        self.assertEqual(recovery['stage'], 'recovery')
 
     def test_runtime_recovery_stops_after_two_failed_attempts(self):
         attempts = []
@@ -120,6 +135,38 @@ class MCPRecoveryTests(unittest.TestCase):
         self.assertEqual(len(attempts), 2)
         self.assertEqual(client.recovery_count, 2)
 
+    def test_refused_connection_is_sent_once_after_verified_restart(self):
+        for name in ('breath_search', 'hold'):
+            with self.subTest(name=name):
+                recovered = []
+                client = self.backend([ExceptionGroup('wrapped', [ConnectionRefusedError()]), 'after restart'])
+                client.recovery = lambda: recovered.append('verified')
+                self.assertEqual(client.call(name, {}), 'after restart')
+                self.assertEqual(client.calls, [name, name])
+                self.assertEqual(recovered, ['verified'])
+                self.assertEqual((client.recovery_count, client.recovery_streak), (1, 0))
+
+    def test_refused_connection_without_restart_is_not_resent(self):
+        client = self.backend([ConnectionRefusedError()])
+        client.recovery = lambda: (_ for _ in ()).throw(RuntimeError('synthetic'))
+        with self.assertRaises(MemoryToolError):
+            client.call('hold', {})
+        self.assertEqual(client.calls, ['hold'])
+
+    def test_failed_resend_stays_unknown_and_mixed_group_is_not_resent(self):
+        client = self.backend([ConnectionRefusedError(), ConnectionError('lost reply')])
+        client.recovery = lambda: None
+        with self.assertRaises(MemoryToolError) as failed:
+            client.call('hold', {})
+        self.assertEqual(failed.exception.code, 'unknown')
+        self.assertEqual(client.calls, ['hold', 'hold'])
+
+        client = self.backend([ExceptionGroup('mixed', [ConnectionRefusedError(), ConnectionError('lost')])])
+        client.recovery = lambda: None
+        with self.assertRaises(MemoryToolError):
+            client.call('hold', {})
+        self.assertEqual(client.calls, ['hold'])
+
     def test_uncertain_mutation_is_never_replayed(self):
         for name in ('hold', 'trace', 'dream', 'plan', 'letter_write', 'breath_search'):
             with self.subTest(name=name):
@@ -134,6 +181,7 @@ class MCPRecoveryTests(unittest.TestCase):
         with self.assertRaises(MemoryToolError) as failed:
             client.call('pulse', {})
         self.assertEqual(failed.exception.code, 'tool')
+        self.assertEqual(failed.exception.stage, 'mcp_tool')
         self.assertNotIn('private', str(failed.exception))
         self.assertEqual(client.calls, ['pulse'])
 
