@@ -6,7 +6,7 @@ import threading
 import unittest
 from unittest.mock import Mock
 
-from memory_agent import Memory, ordinary_hits, vault_path
+from memory_agent import Memory, MemoryToolError, ordinary_hits, vault_path
 from ombre_resident import resident_config
 from veil_agent import Budget, Character, Chat, Store, UserError, build_self_description
 
@@ -517,6 +517,29 @@ class MemoryTests(unittest.TestCase):
 
     def diagnostics_text(self):
         return (Path(self.temp.name) / 'data/fake/memory/_agent/diagnostics.jsonl').read_text(encoding='utf-8')
+
+    def test_failed_memory_tool_diagnostic_omits_arguments_and_memory_body(self):
+        self.backend.fail = True
+        with self.assertRaises(RuntimeError):
+            self.memory.call('hold', {'content': 'FICTIONAL_MEMORY_BODY',
+                                      'query': 'FICTIONAL_QUERY', 'title': 'fictional'})
+        row = json.loads(self.diagnostics_text().splitlines()[-1])
+        self.assertEqual(row['code'], 'memory_tool_failed')
+        self.assertEqual(row['tool'], 'hold')
+        self.assertEqual(row['error_type'], 'RuntimeError')
+        self.assertNotIn('FICTIONAL_MEMORY_BODY', self.diagnostics_text())
+        self.assertNotIn('FICTIONAL_QUERY', self.diagnostics_text())
+
+    def test_memory_tool_diagnostic_keeps_only_the_safe_mcp_error_code(self):
+        self.backend.call = Mock(side_effect=MemoryToolError('unknown'))
+        with self.assertRaises(MemoryToolError):
+            self.memory.call('breath_search', {'query': 'FICTIONAL_QUERY'})
+        row = json.loads(self.diagnostics_text().splitlines()[-1])
+        self.assertEqual(row, {
+            'time': row['time'], 'code': 'memory_tool_failed', 'tool': 'breath_search',
+            'error_type': 'MemoryToolError', 'error_code': 'unknown',
+        })
+        self.assertNotIn('FICTIONAL_QUERY', self.diagnostics_text())
 
     def test_extraction_uses_its_own_cap_without_reasoning(self):
         self.turns(4)
