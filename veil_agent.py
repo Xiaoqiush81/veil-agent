@@ -25,7 +25,7 @@ CJK_TEXT = re.compile(r'[\u3400-\u9fff]')
 AUTONOMY_WAKE = object()
 TOOL_DATA_RESULTS = {'read_text_file', 'read_multiple_files', 'directory_tree', 'list_directory',
                      'list_directory_with_sizes', 'get_file_info', 'search_files', 'memory_read',
-                     'memory_history', 'breath_search', 'dream', 'pulse', 'letter_read',
+                     'memory_history', 'breath_search', 'dream', 'pulse', 'letter_read', 'lab_file_digest',
                      'long_task_status'}
 
 

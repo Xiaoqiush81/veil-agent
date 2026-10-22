@@ -19,7 +19,7 @@ SIDE_EFFECT_TOOLS = {
 }
 READ_ONLY_TOOLS = {
     'list_directory', 'directory_tree', 'read_text_file', 'read_multiple_files',
-    'get_file_info', 'search_files', 'list_directory_with_sizes', 'breath_search',
+    'get_file_info', 'search_files', 'list_directory_with_sizes', 'lab_file_digest', 'breath_search',
     'dream', 'letter_read', 'memory_history', 'memory_catalog', 'memory_read', 'pulse',
 }
 MAX_PROGRESS_ITEMS = 40
@@ -34,7 +34,8 @@ TASK_UPDATE_TOOL = SimpleNamespace(name='long_task_update', description=(
     'an unfinished task cannot be overwritten. Use action=update with its exact task_id to append '
     'confirmed progress and evidence, set the next step, pause, mark a blocker, or mark the whole goal '
     'completed. A session ending or reaching a tool limit is not task completion. If pending_action exists, '
-    'first inspect the exact target using read_text_file; for file writes and lab moves the program checks actual content against '
+    'first inspect the exact target using read_text_file; for lab moves use lab_file_digest when the file may exceed the read limit. '
+    'For file writes and lab moves the program checks actual content against '
     'the saved operation effect. Resolve only with the pending operation_id shown by long_task_status and after '
     'the program records a matching read. If the effect cannot be confirmed, mark the task blocked and do not repeat it. '
     'This state does not grant file or memory permissions.'), inputSchema={
@@ -492,17 +493,29 @@ class LongTaskStore:
                     if hashlib.sha256(actual).hexdigest() != effect['sha256']:
                         return
                 else:
-                    if name != 'read_text_file':
-                        return
-                    if effect['kind'] == 'suffix' and pending.get('state') != '成功，需核实':
-                        return
-                    length = effect['byte_length']
-                    if len(content) < length:
-                        return
-                    actual = content if effect['kind'] == 'exact' else content[-length:] if length else b''
-                    digest = hashlib.sha256(actual).hexdigest()
-                    if (effect['kind'] == 'exact' and len(content) != length) or digest != effect['sha256']:
-                        return
+                    if pending['tool'] == 'move_lab_file' and name == 'lab_file_digest':
+                        try:
+                            actual = json.loads(result)
+                        except (TypeError, ValueError):
+                            return
+                        if (not isinstance(actual, dict)
+                                or self._normalized_target(actual.get('path', '')) != expected
+                                or type(actual.get('byte_length')) is not int
+                                or actual['byte_length'] != effect['byte_length']
+                                or actual.get('sha256') != effect['sha256']):
+                            return
+                    else:
+                        if name != 'read_text_file':
+                            return
+                        if effect['kind'] == 'suffix' and pending.get('state') != '成功，需核实':
+                            return
+                        length = effect['byte_length']
+                        if len(content) < length:
+                            return
+                        actual = content if effect['kind'] == 'exact' else content[-length:] if length else b''
+                        digest = hashlib.sha256(actual).hexdigest()
+                        if (effect['kind'] == 'exact' and len(content) != length) or digest != effect['sha256']:
+                            return
             pending['verified_in_step'] = self.current_tool_step
             pending['verified_by'] = name
             pending['verified_sha256'] = hashlib.sha256(content).hexdigest()

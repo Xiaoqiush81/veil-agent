@@ -188,6 +188,32 @@ class LongTaskTests(unittest.TestCase):
         reopened.observe_tool_result('read_text_file', destination, '成功', content.decode())
         self.assertIsNone(reopened.read()['pending_action']['verified_in_step'])
 
+    def test_large_lab_move_can_be_verified_with_bounded_digest_result(self):
+        self.create()
+        task_id = self.tasks.read()['task_id']
+        content = bytes(range(256)) * 128
+        digest = hashlib.sha256(content).hexdigest()
+        destination = 'lab/archive/play/large.bin'
+        self.assertEqual(self.tasks.before_tool(
+            'move_lab_file', destination, autonomy=True,
+            args={'source': 'lab/play/large.bin', 'destination': destination}), (None, True))
+        operation_id = self.tasks.read()['pending_action']['operation_id']
+        self.tasks.finish_tool('move_lab_file', destination, '成功',
+                               f'File moved intact ({len(content)} bytes, SHA-256 {digest}).')
+        self.tasks.set_tool_step(1)
+        self.tasks.observe_tool_result('lab_file_digest', destination, '成功', json.dumps({
+            'path': destination, 'byte_length': len(content), 'sha256': '0' * 64}))
+        self.assertIsNone(self.tasks.read()['pending_action']['verified_in_step'])
+        self.tasks.observe_tool_result('lab_file_digest', destination, '成功', json.dumps({
+            'path': destination, 'byte_length': len(content), 'sha256': digest}))
+        self.assertEqual(self.tasks.read()['pending_action']['verified_in_step'], 1)
+        self.tasks.set_tool_step(2)
+        _, state, _ = self.tasks.invoke('long_task_update', {
+            'action': 'update', 'task_id': task_id, 'resolve_pending': True,
+            'pending_operation_id': operation_id,
+            'progress_update': 'Large archived file digest matched.'})
+        self.assertEqual(state, '成功')
+
     def test_append_verification_checks_the_written_suffix(self):
         self.create()
         lab = Path(self.temp.name) / 'lab'

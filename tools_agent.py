@@ -1,5 +1,7 @@
 """Bounded MCP filesystem access and application-enforced tool policy."""
 import asyncio
+import ctypes
+import errno
 import hashlib
 import json
 import os
@@ -22,7 +24,7 @@ ALLOW = {
 }
 ASK = {'write_file', 'append_file', 'grant_append'}
 DENY = {'edit_file', 'move_file'}
-LAB_ONLY = {'create_directory', 'move_lab_file'}
+LAB_ONLY = {'create_directory', 'move_lab_file', 'lab_file_digest'}
 # Memory tools (ticket 007) are offered by memory_native.ToolSet, never by the filesystem server.
 NATIVE = {'hold', 'breath_search', 'trace', 'dream', 'letter_write', 'letter_read',
           'letter_lock_update', 'anchor', 'release', 'plan', 'pulse', 'memory_history', 'memory_catalog', 'memory_read'}
@@ -117,6 +119,23 @@ def _file_identity(info):
     return (info.st_dev, info.st_ino, info.st_ctime_ns, info.st_size)
 
 
+def _rename_noreplace(source, destination):
+    if os.name == 'nt':
+        os.rename(source, destination)
+        return
+    try:
+        renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+    except AttributeError as exc:
+        raise OSError(errno.ENOTSUP, 'atomic no-replace rename is unavailable') from exc
+    renameat2.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int,
+                          ctypes.c_char_p, ctypes.c_uint)
+    renameat2.restype = ctypes.c_int
+    result = renameat2(-100, os.fsencode(source), -100, os.fsencode(destination), 1)
+    if result != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code), str(source), str(destination))
+
+
 def display_call(name, summary, state, reason=None):
     line = f'🔧 Peter 用了 {name}：{summary}（{state}）'
     return f'{line}：{reason}' if reason else line
@@ -195,6 +214,12 @@ class FilesystemTools:
                     'source': {'type': 'string', 'description': 'Existing file path inside lab/.'},
                     'destination': {'type': 'string', 'description': 'New lab/archive/ path or lab restore path.'}},
                     'required': ['source', 'destination'], 'additionalProperties': False}))
+            self.tools.append(SimpleNamespace(name='lab_file_digest',
+                description=('Return the byte length and SHA-256 digest of one regular, unlinked file inside lab/. '
+                             'This reads bytes in bounded chunks and returns metadata only; it cannot read or change '
+                             'files outside lab/.'),
+                inputSchema={'type': 'object', 'properties': {'path': {'type': 'string'}},
+                             'required': ['path'], 'additionalProperties': False}))
         self.tools.append(SimpleNamespace(name='append_file',
             description='Append text to an existing workspace file without changing old content. '
                         'Inside lab no confirmation is needed. Outside lab requires consent '
@@ -427,6 +452,8 @@ class FilesystemTools:
             return 'This tool is not authorized for the current role. Choose an available tool; permissions cannot be bypassed.', '被拒绝', name
         if name == 'move_lab_file':
             return self._move_lab_file(args)
+        if name == 'lab_file_digest':
+            return self._lab_file_digest(args)
         try:
             resolved = {}
             for key, index, value in _path_arguments(name, args):
@@ -540,7 +567,8 @@ class FilesystemTools:
     def _move_lab_file(self, args):
         summary = 'move_lab_file'
         source = destination = None
-        source_identity = None
+        moved_identity = None
+        move_completed = False
         try:
             if (not isinstance(args, dict) or set(args) != {'source', 'destination'} or
                     not all(isinstance(args[key], str) for key in ('source', 'destination'))):
@@ -580,7 +608,6 @@ class FilesystemTools:
             before = source.stat(follow_symlinks=False)
             if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
                 return 'Only an unlinked regular file can be moved. No file was moved.', '被拒绝', summary
-            source_identity = (before.st_dev, before.st_ino, before.st_size)
             digest = hashlib.sha256()
             with source.open('rb') as handle:
                 opened = os.fstat(handle.fileno())
@@ -602,29 +629,12 @@ class FilesystemTools:
             if (before_move.st_dev, before_move.st_ino, before_move.st_size, before_move.st_mtime_ns) != (
                     before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns):
                 return 'The source changed before the move. No file was moved.', '被拒绝', summary
-            if os.name == 'nt':
-                # Windows os.rename uses a no-replace move and keeps the operation
-                # within the same volume; the source remains if the move fails.
-                os.rename(source, destination)
-            else:
-                # POSIX os.rename replaces an existing target. A hard-link creation
-                # is atomic and no-replace; removing the source afterwards cannot
-                # truncate or rewrite file contents. If unlink fails, both names remain.
-                os.link(source, destination, follow_symlinks=False)
-                linked = destination.stat(follow_symlinks=False)
-                if (linked.st_dev, linked.st_ino, linked.st_size) != (
-                        before.st_dev, before.st_ino, before.st_size):
-                    os.unlink(destination)
-                    raise OSError('source changed during move')
-                try:
-                    os.unlink(source)
-                except OSError:
-                    try:
-                        os.unlink(destination)
-                    except OSError:
-                        pass
-                    raise
+            # Use one no-replace directory-entry rename so a concurrent source
+            # replacement cannot be unlinked after the original was linked.
+            _rename_noreplace(source, destination)
+            move_completed = True
             moved = destination.stat(follow_symlinks=False)
+            moved_identity = (moved.st_dev, moved.st_ino, moved.st_size)
             if (not stat.S_ISREG(moved.st_mode) or (moved.st_dev, moved.st_ino, moved.st_size) !=
                     (before.st_dev, before.st_ino, before.st_size)):
                 raise OSError('moved file identity changed')
@@ -643,24 +653,52 @@ class FilesystemTools:
         except ValueError:
             return 'The move path is outside the permitted lab/archive area or crosses a link. No file was moved.', '被拒绝', summary
         except (OSError, RuntimeError):
-            if source is not None and destination is not None:
+            if (move_completed and moved_identity is not None
+                    and source is not None and destination is not None):
                 try:
                     moved = destination.stat(follow_symlinks=False)
                     if (not source.exists() and stat.S_ISREG(moved.st_mode) and
-                            (moved.st_dev, moved.st_ino, moved.st_size) == source_identity and
+                            (moved.st_dev, moved.st_ino, moved.st_size) == moved_identity and
                             not _redirected(destination)):
-                        if os.name == 'nt':
-                            os.rename(destination, source)
-                        else:
-                            os.link(destination, source, follow_symlinks=False)
-                            try:
-                                os.unlink(destination)
-                            except OSError:
-                                pass
+                        _rename_noreplace(destination, source)
                 except OSError:
                     pass
             return ('The move could not be completed safely. Check that the original file is still present '
                     'before retrying; no file contents were intentionally changed.'), '出错', summary
+
+    def _lab_file_digest(self, args):
+        summary = 'lab_file_digest'
+        try:
+            if (not isinstance(args, dict) or set(args) != {'path'}
+                    or not isinstance(args['path'], str)):
+                return 'A single lab file path is required.', '被拒绝', summary
+            path = self._checked_lab_path(args['path'])
+            summary = _summary(self.workspace, path)
+            if path.is_symlink() or _redirected(path) or not path.is_file():
+                return 'Only a regular file inside lab/ can be checked.', '被拒绝', summary
+            before = path.stat(follow_symlinks=False)
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
+                return 'Only an unlinked regular file inside lab/ can be checked.', '被拒绝', summary
+            digest = hashlib.sha256()
+            with path.open('rb') as handle:
+                opened = os.fstat(handle.fileno())
+                identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+                if (opened.st_dev, opened.st_ino, opened.st_size, opened.st_mtime_ns) != identity:
+                    return 'The file changed while it was being checked.', '出错', summary
+                for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                    digest.update(chunk)
+                after_read = os.fstat(handle.fileno())
+            after = path.stat(follow_symlinks=False)
+            if any((item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns) != identity
+                   for item in (after_read, after)):
+                return 'The file changed while it was being checked.', '出错', summary
+            return (json.dumps({'path': summary.replace('\\', '/'), 'byte_length': before.st_size,
+                                'sha256': digest.hexdigest()}, separators=(',', ':')),
+                    '成功', summary)
+        except ValueError:
+            return 'The requested path is outside the permitted lab area or crosses a link.', '被拒绝', summary
+        except (OSError, RuntimeError):
+            return 'The lab file could not be checked safely.', '出错', summary
 
     def _invoke_lab(self, name, raw, args, summary):
         try:
