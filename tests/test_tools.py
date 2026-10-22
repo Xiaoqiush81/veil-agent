@@ -411,11 +411,14 @@ class ToolPolicyTests(unittest.TestCase):
         second._record_capabilities(['read_text_file'])
         self.assertIsNone(second.capability_event)
 
-    def test_autonomy_announcement_is_noop_without_file_tools(self):
+    def test_autonomy_announcement_is_recorded_without_file_tools(self):
         store = Store(self.root / 'data')
         manager = FilesystemTools(self.root, SimpleNamespace(id='test', tools=None), store)
         manager.announce_autonomy()
-        self.assertIsNone(manager.capability_event)
+        self.assertIn('autonomous activity is enabled', manager.capability_event)
+        row = json.loads(manager.cap_path.read_text(encoding='utf-8'))
+        self.assertTrue(row['autonomy_announced'])
+        self.assertEqual(row['capability_updates'][-1]['text'], manager.capability_event)
 
     def test_missing_node_disables_tools_without_blocking_chat_startup(self):
         store = Store(self.root / 'data')

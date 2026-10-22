@@ -8,5 +8,7 @@
 - PR #105 描述与 `docs/tickets/068-live-capability-awareness.md` 已补上能力目录和 UTC 时间线：逐项列明 PR #13、#16、#34、#48、#56、#61、#97、#102 的合并时点、Peter 获得的能力及限制，并列出本单修补内容。日期只代表已验证的 GitHub 合并时间；Peter 本机启用时间只能取自私人本机记录，未虚构。
 - main branch-protection 端点虽返回 403，但 repository ruleset `VEIL Main Protection` 可读：main 禁删除/强推，PR required approval 数为 0，严格要求四组 Windows/Ubuntu Python 3.11/3.12、`audit`、`scanner-report-smoke` 六项检查；没有 bypass actor。不得绕过规则。Lan 的 Windows 自然聊天验收尚未做，不能宣布完成。
 - PR #105 描述已加入完整能力工具目录和 PR #13/#16/#34/#48/#56/#61/#97/#102 的 UTC 合并时间线，以及本单修补历史；PR 正文注明各日期是代码合并日期，不冒称 Lan 实际启用时间。Cubic 已将第二轮两条 inline 意见标记解决；Cubic check 仍在 `in_progress`。
-- 下个窗口第一步：提交/推送当前 STATUS 与 HANDOFF 更新，等待 Cubic check 和该状态提交触发的最新六项 required checks 完成；随后按 ruleset 正常合并。保持未跟踪 `.worktrees/` 不动。Lan 之后验收：面板与 Peter 一致，Peter 无需用户解释能说出两项新能力和限制，后续聊天不重复。
+- Cubic 第三轮发现：能力历史启用提示不应依赖文件工具开关；修复应在仍有自主活动/记忆/消息工具的配置中写入现有能力历史，且兼容记录文件尚不存在。已移除错误的 enabled 条件、支持首次创建记录，并新增“无文件工具也记录自主活动提示”的假数据回归；该测试修复前因提示为空、移除条件后又因文件不存在而失败，修复后通过。仓库 `.venv` 全套 365 项通过、3 项可选跳过，`git diff --check` 通过。
+- 修正 PR #105 时间线：该 PR 仍未合并，不能把 2026-10-22 标为合并时间；本单日期标记为修补记录日期，待实际合并后补写合并时间。能力表覆盖 PR #13/#16/#34/#48/#56/#61/#97/#102 的已核验合并时间、获得能力及限制，并列出本单不新增能力的各项修复。
+- 下个窗口第一步：更新 STATUS/HANDOFF、提交并推送第三轮修补，更新 PR 正文并请求 Cubic 第三轮复审；随后等最新六项 required checks 和 Cubic check 通过，再按 ruleset 正常合并。保持未跟踪 `.worktrees/` 不动。Lan 的自然聊天体验验收仍待做：面板与 Peter 一致，Peter 不经用户解释能说出当前能力与限制。
 - 范围：不改记忆系统、Ombre、长期任务执行或真实文件权限；只用虚构数据和假模型。

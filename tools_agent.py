@@ -445,10 +445,12 @@ class FilesystemTools:
 
     @capability_transaction
     def announce_autonomy(self):
-        if getattr(self, 'cap_path', None) is None or getattr(self, 'enabled', None) is False:
+        if getattr(self, 'cap_path', None) is None:
             return
         try:
-            row = json.loads(self.cap_path.read_text(encoding='utf-8'))
+            row = json.loads(self.cap_path.read_text(encoding='utf-8')) if self.cap_path.exists() else {}
+            if not isinstance(row, dict):
+                raise ValueError('invalid capability record')
             if row.get('autonomy_announced'):
                 return
             event = ('Capability update: autonomous activity is enabled: you will wake on the configured schedule and may act or '
