@@ -58,6 +58,7 @@ class MCP:
         self.url, self.token = url, token
         self.recovery = recovery
         self.recovery_count = 0
+        self.recovery_streak = 0  # recoveries since the last healthy reply
         self.diagnostic = None
         self.closed = False
         self.state_lock = threading.Lock()
@@ -118,6 +119,23 @@ class MCP:
         except Exception as exc:
             raise MCPStageError('http_session') from exc
 
+    @staticmethod
+    def _never_sent(exc):
+        """True only when the failure was a refused connection, before any request was sent."""
+        seen = set()
+        def refused(error):
+            if error is None or id(error) in seen:
+                return False
+            seen.add(id(error))
+            if isinstance(error, ConnectionRefusedError) or type(error).__name__ == 'ConnectError':
+                return True
+            children = getattr(error, 'exceptions', ())
+            if children:
+                # Every grouped failure must prove non-delivery; a mixed group is uncertain.
+                return all(refused(child) for child in children)
+            return refused(error.__cause__) or refused(error.__context__)
+        return refused(exc)
+
     def _diagnose(self, name, exc, attempt):
         kinds = []
         stages = []
@@ -167,9 +185,10 @@ class MCP:
         return '\n'.join(c.text for c in response.content if hasattr(c, 'text'))
 
     async def _recover(self, name, attempt):
-        if self.recovery is None or self.recovery_count >= 2:
+        if self.recovery is None or self.recovery_streak >= 2:
             return False
         self.recovery_count += 1
+        self.recovery_streak += 1
         try:
             recovery_result = await asyncio.to_thread(self.recovery)
         except Exception as exc:
@@ -213,7 +232,10 @@ class MCP:
             try:
                 async with asyncio.timeout(200):
                     attempts = 2 if name in self.RETRYABLE_READS else 1
-                    for attempt in range(1, attempts + 1):
+                    attempt = 0
+                    resent = False
+                    while attempt < attempts:
+                        attempt += 1
                         try:
                             async with asyncio.timeout(40 if attempts == 2 else 85):
                                 self.active_stage = 'mcp_session'
@@ -226,13 +248,21 @@ class MCP:
                             if attempt == attempts and name in self.RETRYABLE_READS:
                                 raise MemoryToolError('connection') from exc
                             restored = await self._recover(name, attempt)
+                            if restored and attempts == 1 and self._never_sent(exc):
+                                # Ombre refused the connection, so this call never
+                                # reached it; after a verified restart it is safe to send once.
+                                attempts = 2
+                                resent = True
+                                continue
                             if attempt == attempts:
+                                # A failed resend may have reached Ombre, so its outcome stays unknown.
                                 raise MemoryToolError(
-                                    'connection' if attempts == 2 else 'unknown',
+                                    'connection' if attempts == 2 and not resent else 'unknown',
                                     stage=('recovery' if self.recovery is not None and not restored
                                            else getattr(exc, 'stage', None))) from exc
                             if self.recovery is not None and not restored:
                                 raise MemoryToolError('connection', stage='recovery') from exc
+                    self.recovery_streak = 0  # A healthy reply restores the recovery allowance.
                     result.set_result(text)
             except TimeoutError as exc:
                 self._diagnose(name, exc, 0)
