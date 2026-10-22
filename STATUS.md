@@ -1,10 +1,10 @@
 # 当前状态
 
-更新：2026-10-22 04:53 UTC · Codex。061 Peter Lab 文件归档施工中；060（PR #96）并行施工，未合并；058（PR #95）已合入 main `560bf602`；057（PR #94）已合入；056（PR #93）已合入；055（PR #92）自动回归与 GitHub CI 已通过，待 Lan 安排复核和 Windows 虚构数据体验；054（PR #91）与 053（PR #90）已合入；052（PR #89）、051（PR #88）、047 Windows 桌面版 0.1（PR #84）、050（PR #86，原撞号 047）、048（PR #87）及 049、045、046、044、043、041、042、040 均已合入
+更新：2026-10-22 04:57 UTC · Codex。061（PR #97）已提交并推送，等待 GitHub CI；060（PR #96）并行施工，未合并；058（PR #95）已合入 main `560bf602`；057（PR #94）已合入；056（PR #93）已合入；055（PR #92）自动回归与 GitHub CI 已通过，待 Lan 安排复核和 Windows 虚构数据体验；054（PR #91）与 053（PR #90）已合入；052（PR #89）、051（PR #88）、047 Windows 桌面版 0.1（PR #84）、050（PR #86，原撞号 047）、048（PR #87）及 049、045、046、044、043、041、042、040 均已合入
 
 ## 当前目标与现状
 
-- **061 Peter Lab 文件归档：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，独立分支 `ticket/061-lab-archive`。正在为现有程序层路径/权限检查增加 lab 普通文件的 archive/恢复移动；MCP 自带 `move_file` 仍禁止，成长日记权限独立。虚构回归已补，开发端 Python 命令当前指向不可启动的 Windows App Execution Alias，本机测试未运行；PR 与 CI 待提交推送后检查。Windows 真实体验未验收。
+- **061 Peter Lab 文件归档：** 基于 main `560bf6028dd5bc4b912c54eb8f50c01d76ed1602`，独立分支 `ticket/061-lab-archive`，PR #97（head `df29bac`）。已增加仅限普通 lab 目录与 `lab/archive/` 之间移动单个普通文件的权限，拒绝覆盖并核对 SHA-256；MCP 自带 `move_file` 仍禁止，成长日记保护独立。虚构回归已补，`git diff --check` 通过；本机测试未运行：Python App Execution Alias 启动时报“系统无法访问此文件”。GitHub CI 待检查；Lan 的 Windows 真实体验未验收。
 
 - **058 记忆检索分支隔离与安全诊断：** PR #95 已合入 main `560bf602`；记忆检索分支隔离和隐私安全诊断已上线，Lan 的 Windows 虚构数据体验仍待验收。
 
@@ -43,7 +43,7 @@
 
 ## 下一步
 
-完成 061 定向回归与差异复核，提交、推送并开 PR；检查 GitHub CI，不自行合并，也不等待 CodeRabbit。
+检查 PR #97 的 GitHub CI 和会影响实际功能或安全的审查意见；按 Lan 指示不自行合并、不等待 CodeRabbit。
 
 ## Windows 验收
 
